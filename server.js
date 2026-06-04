@@ -24,15 +24,30 @@ const lineClient = new line.messagingApi.MessagingApiClient({
 // ── EXPRESS SETUP ──────────────────────────────────────
 const app = express();
 app.use(cors());
-
-// LINE webhook needs raw body
-app.use('/webhook', line.middleware(messagingConfig));
-app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const LIFF_ID = process.env.LIFF_ID;
+// LINE webhook — must use raw body for signature verification
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  // Always respond 200 immediately
+  res.sendStatus(200);
+  try {
+    // Verify signature
+    const signature = req.headers['x-line-signature'];
+    if (!line.validateSignature(req.body, process.env.LINE_CHANNEL_SECRET, signature)) {
+      console.log('Invalid signature — skipping');
+      return;
+    }
+    const body = JSON.parse(req.body.toString());
+    const events = body.events || [];
+    for (const event of events) {
+      try { await handleEvent(event); } catch (err) { console.error('Event error:', err); }
+    }
+  } catch (err) {
+    console.error('Webhook error:', err);
+  }
+});
+
+app.use(express.json({ limit: '10mb' }));
 
 // ── HELPERS ────────────────────────────────────────────
 async function getStaffByLineId(lineUserId) {
@@ -85,19 +100,6 @@ const MTH = ['January','February','March','April','May','June','July','August','
 // ── HEALTH CHECK ───────────────────────────────────────
 app.get('/', (req, res) => {
   res.send('✅ RCG Payroll LINE Server is running!');
-});
-
-// ── LINE WEBHOOK ───────────────────────────────────────
-app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // respond immediately
-  const events = req.body.events || [];
-  for (const event of events) {
-    try {
-      await handleEvent(event);
-    } catch (err) {
-      console.error('Event error:', err);
-    }
-  }
 });
 
 async function handleEvent(event) {
