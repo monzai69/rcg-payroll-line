@@ -26,31 +26,30 @@ const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// LINE webhook — must use raw body for signature verification
-app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  // Always respond 200 immediately
+// ── LINE WEBHOOK ──────────────────────────────────────
+app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  // Respond 200 IMMEDIATELY — before any async work
   res.sendStatus(200);
-  try {
-    // Verify signature
-    const signature = req.headers['x-line-signature'];
-    if (!line.validateSignature(req.body, process.env.LINE_CHANNEL_SECRET, signature)) {
-      console.log('Invalid signature — skipping');
-      return;
+  // Process events asynchronously after response
+  setImmediate(async () => {
+    try {
+      const signature = req.headers['x-line-signature'];
+      if (!line.validateSignature(req.body, process.env.LINE_CHANNEL_SECRET, signature)) {
+        console.log('Invalid signature — skipping');
+        return;
+      }
+      const body = JSON.parse(req.body.toString());
+      const events = body.events || [];
+      for (const event of events) {
+        try { await handleEvent(event); } catch (err) { console.error('Event error:', err); }
+      }
+    } catch (err) {
+      console.error('Webhook processing error:', err);
     }
-    const body = JSON.parse(req.body.toString());
-    const events = body.events || [];
-    for (const event of events) {
-      try { await handleEvent(event); } catch (err) { console.error('Event error:', err); }
-    }
-  } catch (err) {
-    console.error('Webhook error:', err);
-  }
+  });
 });
 
 app.use(express.json({ limit: '10mb' }));
-const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-const LIFF_ID = process.env.LIFF_ID;
 
 // ── HELPERS ────────────────────────────────────────────
 async function getStaffByLineId(lineUserId) {
@@ -103,6 +102,20 @@ const MTH = ['January','February','March','April','May','June','July','August','
 // ── HEALTH CHECK ───────────────────────────────────────
 app.get('/', (req, res) => {
   res.send('✅ RCG Payroll LINE Server is running!');
+});
+
+// One-time admin setup — open in browser to register admin LINE ID
+app.get('/setup-admin/:lineUserId', async (req, res) => {
+  try {
+    const { lineUserId } = req.params;
+    const snap = await db.collection('config').doc('adminLineIds').get();
+    const existing = snap.exists ? (snap.data().ids || []) : [];
+    if (!existing.includes(lineUserId)) existing.push(lineUserId);
+    await db.collection('config').doc('adminLineIds').set({ ids: existing });
+    res.send(`✅ Admin registered! LINE ID: ${lineUserId}<br>Current admins: ${existing.join(', ')}`);
+  } catch (err) {
+    res.status(500).send('❌ Error: ' + err.message);
+  }
 });
 
 async function handleEvent(event) {
@@ -489,5 +502,11 @@ app.post('/api/set-admin-line-id', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ RCG Payroll LINE Server running on port ${PORT}`);
   console.log(`📡 Webhook: ${BASE_URL}/webhook`);
-  console.log(`🔗 LIFF: ${BASE_URL}/liff`);
+  console.log(`🔗 LIFF: ${BASE_URL}`);
+  // Keep-alive ping every 10 min to prevent sleep
+  if (BASE_URL && !BASE_URL.includes('localhost')) {
+    setInterval(() => {
+      require('https').get(BASE_URL, () => {}).on('error', () => {});
+    }, 10 * 60 * 1000);
+  }
 });
