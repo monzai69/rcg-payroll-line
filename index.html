@@ -394,15 +394,39 @@ async function loadSalary() {
       result.innerHTML = `<div class="alert alert-yellow">⚠️ ${data.msg}</div>`;
       return;
     }
+    const renderRow = r => {
+      const isDed = r.type === 'ded';
+      const isSub = r.type === 'sub';
+      const isInfo = r.type === 'info';
+      const color = isDed ? '#e24b4a' : isSub ? '#1e3a5f' : isInfo ? '#6b7280' : '#1a1a2e';
+      const weight = isSub ? '700' : '500';
+      const bg = isSub ? '#f8fafc' : isInfo ? '#eff6ff' : '#fff';
+      const amt = r.amt < 0 ? '−' + fmt(Math.abs(r.amt)) : fmt(r.amt);
+      return `<div style="display:flex;justify-content:space-between;padding:8px 14px;border-bottom:1px solid #f3f4f6;background:${bg}">
+        <span style="font-size:13px;color:${isDed?'#9ca3af':isInfo?'#6b7280':'#1a1a2e'};font-weight:${weight}">${r.label}</span>
+        <span style="font-size:13px;font-weight:${weight};color:${color}">${amt} ฿</span>
+      </div>`;
+    };
+    const incomeRows = data.rows.filter(r => r.type === 'income' || r.type === 'info');
+    const subRows = data.rows.filter(r => r.type === 'sub');
+    const dedRows = data.rows.filter(r => r.type === 'ded');
+    const sectionHdr = label => `<div style="padding:6px 14px;background:#f8fafc;font-size:10px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.8px">${label}</div>`;
     result.innerHTML = `
-      <div class="card" style="text-align:center">
-        <div style="font-size:13px;color:#6b7280;margin-bottom:4px">${data.period}</div>
-        <div style="font-size:14px;font-weight:700;color:#374151;margin-bottom:12px">${data.staffName}</div>
-        <div style="background:#1e3a5f;border-radius:12px;padding:18px;margin-bottom:12px">
-          <div style="font-size:12px;color:#93c5fd;margin-bottom:4px">NET PAY</div>
-          <div style="font-size:32px;font-weight:800;color:#fde68a">${fmt(data.net)} ฿</div>
+      <div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
+        <div style="background:#1e3a5f;padding:18px 16px 14px">
+          <div style="font-size:11px;color:#93c5fd;font-weight:600;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">RCG Payroll</div>
+          <div style="font-size:18px;font-weight:800;color:#fff">${data.staffName}</div>
+          <div style="font-size:12px;color:#93c5fd;margin-top:2px">${data.pos} · ${data.period}</div>
         </div>
-        <div style="font-size:12px;color:#9ca3af">หากมีข้อสงสัย กรุณาติดต่อ HR</div>
+        ${sectionHdr('INCOME')}
+        ${incomeRows.map(renderRow).join('')}
+        ${subRows.map(renderRow).join('')}
+        ${dedRows.length ? sectionHdr('DEDUCTIONS') + dedRows.map(renderRow).join('') : ''}
+        <div style="background:#1e3a5f;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:15px;font-weight:700;color:#fff">NET PAY</span>
+          <span style="font-size:28px;font-weight:900;color:#fde68a">${fmt(data.net)} ฿</span>
+        </div>
+        <div style="padding:10px 14px;font-size:11px;color:#9ca3af;text-align:center;background:#f8fafc">หากมีข้อสงสัย กรุณาติดต่อ HR</div>
       </div>`;
   } catch (err) {
     result.innerHTML = '<div class="alert alert-red">❌ เกิดข้อผิดพลาด กรุณาลองใหม่</div>';
