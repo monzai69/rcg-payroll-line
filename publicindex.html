@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>RCG Staff Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Sarabun',sans-serif;background:#f4f6f8;color:#1a1a2e;font-size:15px;min-height:100vh}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.active{display:flex}
+.header{background:#1e3a5f;padding:20px 16px 16px;color:#fff}
+.header h1{font-size:20px;font-weight:800;color:#fde68a}
+.header p{font-size:13px;color:#93c5fd;margin-top:3px}
+.body{flex:1;padding:20px 16px}
+.btn{width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:700;font-family:'Sarabun',sans-serif;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+.btn-primary{background:#1e3a5f;color:#fff}
+.btn-yellow{background:#f59e0b;color:#fff}
+.btn-outline{background:#fff;color:#1e3a5f;border:2px solid #1e3a5f}
+.btn-green{background:#16a34a;color:#fff}
+.btn-red{background:#e24b4a;color:#fff}
+.btn-gray{background:#e5e7eb;color:#6b7280}
+.card{background:#fff;border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+.fr{margin-bottom:14px}
+label{display:block;font-size:12px;color:#6b7280;font-weight:600;margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px}
+input,select,textarea{width:100%;padding:12px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:'Sarabun',sans-serif;background:#fff;color:#1a1a2e}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
+.badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.badge-green{background:#dcfce7;color:#16a34a}
+.badge-red{background:#fee2e2;color:#991b1b}
+.badge-yellow{background:#fef3c7;color:#92400e}
+.loading{display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:12px;background:#f4f6f8}
+.spinner{width:40px;height:40px;border:4px solid #e5e7eb;border-top-color:#1e3a5f;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.success-icon{font-size:60px;text-align:center;margin-bottom:12px}
+.alert{padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:14px}
+.alert-green{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.alert-red{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.alert-yellow{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}
+.nav-tabs{display:flex;background:#fff;border-bottom:2px solid #f0f0f0;padding:0 16px}
+.nav-tab{flex:1;padding:12px 0;text-align:center;font-size:13px;font-weight:600;color:#9ca3af;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px}
+.nav-tab.active{color:#1e3a5f;border-bottom-color:#1e3a5f}
+.leave-bal-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:14px}
+.leave-bal-row:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+
+<!-- LOADING -->
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <div style="color:#6b7280;font-size:14px">กำลังโหลด...</div>
+</div>
+
+<!-- NOT REGISTERED -->
+<div class="screen" id="screen-notregistered">
+  <div class="header">
+    <h1>RCG Staff Portal</h1>
+    <p>ReadyCheckGo</p>
+  </div>
+  <div class="body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;text-align:center">
+    <div style="font-size:50px;margin-bottom:16px">🔐</div>
+    <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#1e3a5f">ยังไม่ได้ลงทะเบียน</div>
+    <div style="font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px">กรุณาลงทะเบียนก่อนใช้งาน<br>พิมพ์ใน LINE Chat:<br><b style="color:#1e3a5f">register [รหัสพนักงาน]</b><br><br>ติดต่อ HR เพื่อขอรหัสพนักงาน</div>
+    <button class="btn btn-primary" onclick="liff.closeWindow()">ปิด</button>
+  </div>
+</div>
+
+<!-- HOME MENU -->
+<div class="screen" id="screen-home">
+  <div class="header">
+    <h1 id="home-greeting">สวัสดี 👋</h1>
+    <p id="home-subtext">RCG Staff Portal</p>
+  </div>
+  <div class="body">
+    <button class="btn btn-yellow" onclick="showScreen('leave')">
+      🏖️ ขอลา / Leave Request
+    </button>
+    <button class="btn btn-primary" onclick="showScreen('salary')">
+      💰 ตรวจสอบเงินเดือน / My Salary
+    </button>
+    <button class="btn btn-outline" onclick="showScreen('document')">
+      📄 ขอเอกสาร / Request Document
+    </button>
+    <div style="margin-top:20px;padding:12px 14px;background:#f8fafc;border-radius:10px;font-size:12px;color:#9ca3af;text-align:center">
+      RCG Payroll System · ReadyCheckGo
+    </div>
+  </div>
+</div>
+
+<!-- LEAVE REQUEST -->
+<div class="screen" id="screen-leave">
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <button onclick="showScreen('home')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px">←</button>
+      <h1 style="font-size:18px">ขอลา</h1>
+    </div>
+    <p>Leave Request</p>
+  </div>
+  <!-- Leave balance -->
+  <div style="background:#1e3a5f;padding:0 16px 16px">
+    <div style="font-size:11px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">วันลาคงเหลือ / Leave Balance</div>
+    <div id="leave-balance-strip" style="display:flex;gap:8px">
+      <div style="flex:1;background:rgba(255,255,255,.1);border-radius:9px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:#93c5fd">Annual</div>
+        <div style="font-size:18px;font-weight:800;color:#fde68a" id="bal-annual">—</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,.1);border-radius:9px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:#93c5fd">Sick</div>
+        <div style="font-size:18px;font-weight:800;color:#fde68a" id="bal-sick">—</div>
+      </div>
+      <div style="flex:1;background:rgba(255,255,255,.1);border-radius:9px;padding:9px 10px;text-align:center">
+        <div style="font-size:10px;color:#93c5fd">Business</div>
+        <div style="font-size:18px;font-weight:800;color:#fde68a" id="bal-business">—</div>
+      </div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="fr">
+        <label>ประเภทการลา / Leave Type</label>
+        <select id="leave-type" onchange="onLeaveTypeChange()">
+          <option value="annual">Annual Leave (ลาพักร้อน)</option>
+          <option value="sick">Sick Leave (ลาป่วย)</option>
+          <option value="business">Business Leave (ลากิจ)</option>
+          <option value="custom">Other (อื่นๆ)</option>
+        </select>
+      </div>
+      <div class="fr" id="leave-custom-row" style="display:none">
+        <label>ชื่อประเภทลา / Leave Name</label>
+        <input type="text" id="leave-custom-name" placeholder="เช่น ลาเพื่อแต่งงาน">
+      </div>
+      <div class="fr">
+        <label>วันที่เริ่มลา / From Date</label>
+        <input type="date" id="leave-from" onchange="calcLeaveDays()">
+      </div>
+      <div class="fr">
+        <label>วันที่สิ้นสุด / To Date</label>
+        <input type="date" id="leave-to" onchange="calcLeaveDays()">
+      </div>
+      <div class="fr">
+        <label>จำนวนวัน / Days</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="leave-days" step="0.5" min="0.5" placeholder="0.5" style="flex:1">
+          <select id="leave-half" style="width:130px">
+            <option value="full">Full day(s)</option>
+            <option value="half">Half day</option>
+          </select>
+        </div>
+      </div>
+      <div class="fr">
+        <label>เหตุผล / Reason</label>
+        <textarea id="leave-reason" rows="3" placeholder="เช่น กลับบ้านต่างจังหวัด"></textarea>
+      </div>
+      <div id="leave-sick-note" style="display:none" class="alert alert-yellow">
+        ⚠️ การลาป่วย 2 วันขึ้นไปติดต่อกัน ต้องแนบใบรับรองแพทย์<br>กรุณาส่งรูปใบรับรองแพทย์ให้ HR ทาง LINE
+      </div>
+      <div id="leave-msg" style="display:none" class="alert"></div>
+    </div>
+    <button class="btn btn-yellow" onclick="submitLeave()" id="btn-submit-leave">
+      📤 ส่งคำขอลา / Submit
+    </button>
+  </div>
+</div>
+
+<!-- SALARY -->
+<div class="screen" id="screen-salary">
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <button onclick="showScreen('home')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px">←</button>
+      <h1 style="font-size:18px">เงินเดือน</h1>
+    </div>
+    <p>My Salary</p>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="fr">
+        <label>เดือน / Month</label>
+        <div style="display:flex;gap:8px">
+          <select id="sal-month" style="flex:1"></select>
+          <select id="sal-year" style="width:100px"></select>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="loadSalary()">ตรวจสอบ / Check</button>
+    </div>
+    <div id="salary-result"></div>
+  </div>
+</div>
+
+<!-- DOCUMENT REQUEST -->
+<div class="screen" id="screen-document">
+  <div class="header">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <button onclick="showScreen('home')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:32px;height:32px;border-radius:8px;cursor:pointer;font-size:16px">←</button>
+      <h1 style="font-size:18px">ขอเอกสาร</h1>
+    </div>
+    <p>Document Request</p>
+  </div>
+  <div class="body">
+    <div class="card">
+      <div class="fr">
+        <label>ประเภทเอกสาร / Document Type</label>
+        <select id="doc-type">
+          <option value="payslip">สลิปเงินเดือน (Pay Slip)</option>
+          <option value="cert">หนังสือรับรองการทำงาน (Employment Certificate)</option>
+        </select>
+      </div>
+      <div class="fr">
+        <label>หมายเหตุ / Note (optional)</label>
+        <textarea id="doc-note" rows="2" placeholder="เช่น ต้องการยื่นธนาคาร"></textarea>
+      </div>
+      <div id="doc-msg" style="display:none" class="alert"></div>
+    </div>
+    <button class="btn btn-primary" onclick="submitDocRequest()" id="btn-submit-doc">
+      📤 ส่งคำขอ / Submit
+    </button>
+  </div>
+</div>
+
+<script>
+const API = location.origin;
+const MTH = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const MTH_TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+
+let currentStaff = null;
+let lineProfile = null;
+
+// ── INIT ──────────────────────────────────────────────
+async function init() {
+  try {
+    await liff.init({ liffId: '2010289935-ac793q9P' });
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+    lineProfile = await liff.getProfile();
+    // Get page from URL params
+    const params = new URLSearchParams(location.search);
+    const page = params.get('page') || 'home';
+    const staffIdParam = params.get('staffId');
+    // Verify staff
+    const res = await fetch(`${API}/api/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lineUserId: lineProfile.userId, staffId: staffIdParam })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      hideLoading();
+      showScreen('notregistered');
+      return;
+    }
+    currentStaff = data.staff;
+    // Setup UI
+    document.getElementById('home-greeting').textContent = `สวัสดี ${currentStaff.nn} 👋`;
+    document.getElementById('home-subtext').textContent = `${currentStaff.pos} · ${currentStaff.dept}`;
+    setupSalarySelectors();
+    // Load leave balance
+    loadLeaveBalance();
+    hideLoading();
+    showScreen(page === 'leave' ? 'leave' : page === 'salary' ? 'salary' : page === 'document' ? 'document' : 'home');
+  } catch (err) {
+    console.error('Init error:', err);
+    hideLoading();
+    showScreen('home');
+  }
+}
+
+function hideLoading() {
+  document.getElementById('loading').style.display = 'none';
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  const el = document.getElementById('screen-' + name);
+  if (el) el.classList.add('active');
+}
+
+// ── LEAVE BALANCE ──────────────────────────────────────
+async function loadLeaveBalance() {
+  if (!currentStaff) return;
+  const year = new Date().getFullYear();
+  try {
+    const res = await fetch(`${API}/api/leave-balance/${currentStaff.id}/${year}`);
+    const data = await res.json();
+    if (!data.ok) return;
+    const allow = currentStaff.leaveAllowance || { annual: 6, sick: 30, business: 3 };
+    const used = data.balance;
+    const remAnnual = (allow.annual || 6) - (used.annual || 0);
+    const remSick = (allow.sick || 30) - (used.sick || 0);
+    const remBusiness = (allow.business || 3) - (used.business || 0);
+    document.getElementById('bal-annual').textContent = `${remAnnual}/${allow.annual||6}`;
+    document.getElementById('bal-sick').textContent = `${remSick}/${allow.sick||30}`;
+    document.getElementById('bal-business').textContent = `${remBusiness}/${allow.business||3}`;
+  } catch (err) {
+    console.error('loadLeaveBalance error:', err);
+  }
+}
+
+// ── LEAVE FORM ─────────────────────────────────────────
+function onLeaveTypeChange() {
+  const type = document.getElementById('leave-type').value;
+  document.getElementById('leave-custom-row').style.display = type === 'custom' ? 'block' : 'none';
+  checkSickNote();
+}
+
+function calcLeaveDays() {
+  const from = document.getElementById('leave-from').value;
+  const to = document.getElementById('leave-to').value;
+  if (from && to) {
+    const d1 = new Date(from), d2 = new Date(to);
+    const diff = Math.round((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
+    if (diff > 0) document.getElementById('leave-days').value = diff;
+  }
+  checkSickNote();
+}
+
+function checkSickNote() {
+  const type = document.getElementById('leave-type').value;
+  const days = parseFloat(document.getElementById('leave-days').value) || 0;
+  document.getElementById('leave-sick-note').style.display = (type === 'sick' && days >= 2) ? 'block' : 'none';
+}
+
+async function submitLeave() {
+  const type = document.getElementById('leave-type').value;
+  const from = document.getElementById('leave-from').value;
+  const to = document.getElementById('leave-to').value || from;
+  const days = parseFloat(document.getElementById('leave-days').value);
+  const reason = document.getElementById('leave-reason').value.trim();
+  const customName = document.getElementById('leave-custom-name').value.trim();
+  const msg = document.getElementById('leave-msg');
+  if (!from) { showMsg(msg, 'กรุณาระบุวันที่เริ่มลา', 'red'); return; }
+  if (!days || days <= 0) { showMsg(msg, 'กรุณาระบุจำนวนวัน', 'red'); return; }
+  const btn = document.getElementById('btn-submit-leave');
+  btn.disabled = true; btn.textContent = '⏳ กำลังส่ง...';
+  try {
+    const res = await fetch(`${API}/api/leave-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffId: currentStaff.id,
+        lineUserId: lineProfile.userId,
+        type, customName, from, to, days, reason
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showMsg(msg, '✅ ส่งคำขอลาเรียบร้อย! รอการอนุมัติจาก HR', 'green');
+      // Clear form
+      document.getElementById('leave-from').value = '';
+      document.getElementById('leave-to').value = '';
+      document.getElementById('leave-days').value = '';
+      document.getElementById('leave-reason').value = '';
+    } else {
+      showMsg(msg, '❌ ' + data.msg, 'red');
+    }
+  } catch (err) {
+    showMsg(msg, '❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'red');
+  }
+  btn.disabled = false; btn.textContent = '📤 ส่งคำขอลา / Submit';
+}
+
+// ── SALARY ─────────────────────────────────────────────
+function setupSalarySelectors() {
+  const now = new Date();
+  const msel = document.getElementById('sal-month');
+  const ysel = document.getElementById('sal-year');
+  MTH_TH.forEach((m, i) => {
+    const o = document.createElement('option');
+    o.value = i + 1; o.textContent = m;
+    if (i + 1 === now.getMonth() + 1) o.selected = true;
+    msel.appendChild(o);
+  });
+  const y = now.getFullYear();
+  [y-1, y, y+1].forEach(yr => {
+    const o = document.createElement('option');
+    o.value = yr; o.textContent = yr;
+    if (yr === y) o.selected = true;
+    ysel.appendChild(o);
+  });
+}
+
+async function loadSalary() {
+  const month = document.getElementById('sal-month').value;
+  const year = document.getElementById('sal-year').value;
+  const result = document.getElementById('salary-result');
+  result.innerHTML = '<div style="text-align:center;padding:20px;color:#9ca3af">⏳ กำลังโหลด...</div>';
+  try {
+    const res = await fetch(`${API}/api/salary/${currentStaff.id}/${year}/${month}`);
+    const data = await res.json();
+    if (!data.ok) {
+      result.innerHTML = `<div class="alert alert-yellow">⚠️ ${data.msg}</div>`;
+      return;
+    }
+    result.innerHTML = `
+      <div class="card" style="text-align:center">
+        <div style="font-size:13px;color:#6b7280;margin-bottom:4px">${data.period}</div>
+        <div style="font-size:14px;font-weight:700;color:#374151;margin-bottom:12px">${data.staffName}</div>
+        <div style="background:#1e3a5f;border-radius:12px;padding:18px;margin-bottom:12px">
+          <div style="font-size:12px;color:#93c5fd;margin-bottom:4px">NET PAY</div>
+          <div style="font-size:32px;font-weight:800;color:#fde68a">${fmt(data.net)} ฿</div>
+        </div>
+        <div style="font-size:12px;color:#9ca3af">หากมีข้อสงสัย กรุณาติดต่อ HR</div>
+      </div>`;
+  } catch (err) {
+    result.innerHTML = '<div class="alert alert-red">❌ เกิดข้อผิดพลาด กรุณาลองใหม่</div>';
+  }
+}
+
+// ── DOCUMENT REQUEST ───────────────────────────────────
+async function submitDocRequest() {
+  const docType = document.getElementById('doc-type').value;
+  const note = document.getElementById('doc-note').value.trim();
+  const msg = document.getElementById('doc-msg');
+  const btn = document.getElementById('btn-submit-doc');
+  btn.disabled = true; btn.textContent = '⏳ กำลังส่ง...';
+  try {
+    const res = await fetch(`${API}/api/document-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffId: currentStaff.id,
+        lineUserId: lineProfile.userId,
+        docType, note
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showMsg(msg, '✅ ส่งคำขอเอกสารเรียบร้อย! HR จะดำเนินการให้เร็วที่สุด', 'green');
+      document.getElementById('doc-note').value = '';
+    } else {
+      showMsg(msg, '❌ ' + data.msg, 'red');
+    }
+  } catch (err) {
+    showMsg(msg, '❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'red');
+  }
+  btn.disabled = false; btn.textContent = '📤 ส่งคำขอ / Submit';
+}
+
+// ── HELPERS ────────────────────────────────────────────
+function showMsg(el, text, type) {
+  el.style.display = 'block';
+  el.className = `alert alert-${type}`;
+  el.textContent = text;
+  setTimeout(() => el.style.display = 'none', 5000);
+}
+
+function fmt(n) {
+  const v = parseFloat(n) || 0;
+  if (v === Math.round(v)) return Math.round(v).toLocaleString();
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Start
+init();
+</script>
+</body>
+</html>
