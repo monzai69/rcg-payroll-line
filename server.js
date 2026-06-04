@@ -194,7 +194,9 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     const payroll = await getPayroll();
     const key = mkKey(month, year);
     const entry = payroll[key] && payroll[key][staffId];
-    if (!entry || !entry.net) return res.json({ ok: false, msg: 'Salary not published yet for this period' });
+    if (!entry) {
+  return res.json({ ok: false, msg: 'Salary not published yet for this period' });
+}
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, net: entry.net, staffName: staff ? `${staff.nn} ${staff.fn}` : staffId });
