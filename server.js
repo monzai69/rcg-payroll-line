@@ -48,6 +48,9 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 });
 
 app.use(express.json({ limit: '10mb' }));
+const PORT = process.env.PORT || 3000;
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+const LIFF_ID = process.env.LIFF_ID;
 
 // ── HELPERS ────────────────────────────────────────────
 async function getStaffByLineId(lineUserId) {
