@@ -332,6 +332,15 @@ app.post('/api/publish-salary', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
+app.get('/debug/payroll', async (req, res) => {
+  try {
+    const payroll = await getPayroll();
+    const keys = Object.keys(payroll);
+    const sample = keys[0] ? Object.keys(payroll[keys[0]]).slice(0,3) : [];
+    res.json({ keys, sample });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── START ──────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ RCG Payroll LINE Server running on port ${PORT}`);
