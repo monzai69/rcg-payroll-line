@@ -279,6 +279,59 @@ app.post('/api/set-admin-line-id', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
+// Publish salary — notify all staff with LINE ID
+app.post('/api/publish-salary', async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const allStaff = await getAllStaff();
+    const staffWithLine = allStaff.filter(s => s.lineUserId && s.st === 'Active');
+    const period = `${MTH[parseInt(month)-1]} ${year}`;
+    let sent = 0;
+    for (const s of staffWithLine) {
+      try {
+        await lineClient.pushMessage({
+          to: s.lineUserId,
+          messages: [{
+            type: 'flex',
+            altText: `💰 เงินเดือน ${period} พร้อมแล้ว!`,
+            contents: {
+              type: 'bubble',
+              header: {
+                type: 'box', layout: 'vertical',
+                backgroundColor: '#1e3a5f', paddingAll: '18px',
+                contents: [
+                  { type: 'text', text: '💰 เงินเดือนพร้อมแล้ว', color: '#fde68a', weight: 'bold', size: 'lg' },
+                  { type: 'text', text: period, color: '#93c5fd', size: 'sm', margin: 'sm' }
+                ]
+              },
+              body: {
+                type: 'box', layout: 'vertical', paddingAll: '18px',
+                contents: [
+                  { type: 'text', text: `สวัสดี ${s.nn} 👋`, weight: 'bold', size: 'md' },
+                  { type: 'text', text: 'เงินเดือนของคุณสำหรับเดือน '+period+' พร้อมให้ตรวจสอบแล้ว', size: 'sm', color: '#6b7280', wrap: true, margin: 'sm' }
+                ]
+              },
+              footer: {
+                type: 'box', layout: 'vertical', paddingAll: '12px',
+                contents: [{
+                  type: 'button', style: 'primary', color: '#f59e0b',
+                  action: {
+                    type: 'uri',
+                    label: '💰 ดูเงินเดือนของฉัน',
+                    uri: `https://liff.line.me/${LIFF_ID}?page=salary&staffId=${s.id}&month=${month}&year=${year}`
+                  }
+                }]
+              }
+            }
+          }]
+        });
+        sent++;
+      } catch (e) { console.error('Failed to notify', s.id, e.message); }
+    }
+    res.json({ ok: true, sent, total: staffWithLine.length });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
 // ── START ──────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`✅ RCG Payroll LINE Server running on port ${PORT}`);
