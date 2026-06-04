@@ -75,7 +75,7 @@ const MTH = ['January','February','March','April','May','June','July','August','
 // ── HEALTH CHECK ───────────────────────────────────────
 app.get('/', (req, res) => res.send('✅ RCG Payroll LINE Server is running!'));
 app.get('/liff', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'public/index.html'));
 });
 
 // One-time admin setup — open in browser
