@@ -89,6 +89,7 @@ app.get('/setup-admin/:lineUserId', async (req, res) => {
 
 // ── LINE BOT HANDLERS ──────────────────────────────────
 async function handleEvent(event) {
+  console.log('Event received:', JSON.stringify(event));
   if (event.type !== 'message' || event.message.type !== 'text') return;
   const lineUserId = event.source.userId;
   const text = event.message.text.trim().toLowerCase();
