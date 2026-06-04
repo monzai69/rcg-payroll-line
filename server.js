@@ -18,7 +18,7 @@ const lineClient = new line.messagingApi.MessagingApiClient({
 // ── EXPRESS SETUP ──────────────────────────────────────
 const app = express();
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
 // LINE webhook — raw body, respond 200 immediately
 app.post('/webhook', express.raw({ type: 'application/json' }), (req, res) => {
@@ -75,7 +75,7 @@ const MTH = ['January','February','March','April','May','June','July','August','
 // ── HEALTH CHECK ───────────────────────────────────────
 app.get('/', (req, res) => res.send('✅ RCG Payroll LINE Server is running!'));
 app.get('/liff', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public/index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // One-time admin setup — open in browser
