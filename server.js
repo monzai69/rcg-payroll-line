@@ -194,12 +194,78 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     const payroll = await getPayroll();
     const key = mkKey(month, year);
     const entry = payroll[key] && payroll[key][staffId];
-    if (!entry) {
-  return res.json({ ok: false, msg: 'Salary not published yet for this period' });
-}
+    if (!entry) return res.json({ ok: false, msg: 'Salary not published yet for this period' });
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
-    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, net: entry.net, staffName: staff ? `${staff.nn} ${staff.fn}` : staffId });
+    if (!staff) return res.json({ ok: false, msg: 'Staff not found' });
+
+    // Build full breakdown from saved snapshot + entry
+    const snap = entry.snap || {};
+    const ct = snap.ct || staff.ct || 'permanent';
+    const isPerm = ct === 'permanent';
+    const emptype = snap.emptype || staff.emptype || 'fulltime';
+    const items = snap.items || staff.items || [];
+    const fptmethod = snap.fptmethod || staff.fptmethod || 'hourly';
+
+    // Base
+    let bG = 0, bLabel = 'Base Salary';
+    if (emptype === 'fulltime') { bG = parseFloat(snap.base || staff.base) || 0; }
+    else if (emptype === 'fullparttime') {
+      if (fptmethod === 'daily') { const d = parseFloat(entry.days)||0, r = parseFloat(snap.fptdayrate||staff.fptdayrate)||0; bG=d*r; bLabel=`${d}d × ${fmt(r)}฿`; }
+      else { const h = parseFloat(entry.hours)||0, r = parseFloat(snap.hrrate||staff.hrrate)||0; bG=h*r; bLabel=`${h}hrs × ${fmt(r)}฿`; }
+    }
+
+    // Leave deduction
+    const dL = parseFloat(entry.dL) || 0;
+    const leaveDays = parseFloat(entry.leaveDays) || 0;
+    const leaveHrs = parseFloat(entry.leaveHrs) || 0;
+
+    // Items
+    const rev = parseFloat(entry.rev) || 0;
+    const itemRows = [];
+    (items).forEach(item => {
+      if (!item || !item.name) return;
+      // Simple: use saved net from items if available, otherwise skip
+    });
+
+    // Key figures from saved entry
+    const gross = parseFloat(entry.gross) || (parseFloat(entry.net)||0);
+    const net = parseFloat(entry.net) || 0;
+    const sso = parseFloat(entry.sso) || 0;
+    const mT = parseFloat(entry.mT) || 0;
+    const whtD = parseFloat(entry.whtD) || 0;
+    const adv = parseFloat(entry.adv) || 0;
+    const dO = parseFloat(entry.dOth) || 0;
+    const bon = parseFloat(entry.bonus) || 0;
+    const otA = parseFloat(entry.otA) || (parseFloat(entry.otHrs)||0) * (parseFloat(snap.otrate||staff.otrate)||0);
+    const otH = parseFloat(entry.otHrs) || 0;
+
+    // Build rows for LIFF display
+    const rows = [];
+    rows.push({ label: bLabel, amt: bG, type: 'income' });
+    if (dL > 0) rows.push({ label: `Leave (${leaveDays}d ${leaveHrs}hrs)`, amt: -dL, type: 'ded' });
+    if (rev > 0 && items.some(i => ['comm_flat','comm_tiered','comm_tiered_fixed'].includes(i.type))) {
+      rows.push({ label: `Revenue`, amt: rev, type: 'info' });
+    }
+    if (otA > 0) rows.push({ label: `OT (${otH}hrs)`, amt: otA, type: 'income' });
+    if (bon > 0) rows.push({ label: 'Bonus', amt: bon, type: 'income' });
+    rows.push({ label: 'Gross Income', amt: gross, type: 'sub' });
+    if (isPerm) {
+      if (sso > 0) rows.push({ label: 'SSO (5%)', amt: -sso, type: 'ded' });
+      if (mT > 0) rows.push({ label: 'Income Tax ภงด.1', amt: -mT, type: 'ded' });
+    } else {
+      if (whtD > 0) rows.push({ label: 'WHT 3%', amt: -whtD, type: 'ded' });
+    }
+    if (adv > 0) rows.push({ label: 'Advance', amt: -adv, type: 'ded' });
+    if (dO > 0) rows.push({ label: 'Other Deductions', amt: -dO, type: 'ded' });
+
+    res.json({
+      ok: true,
+      period: `${MTH[parseInt(month)-1]} ${year}`,
+      staffName: `${staff.nn} ${staff.fn}`,
+      pos: staff.pos || '',
+      net, rows
+    });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
