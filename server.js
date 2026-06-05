@@ -4,11 +4,16 @@ const cors = require('cors');
 const line = require('@line/bot-sdk');
 const admin = require('firebase-admin');
 const path = require('path');
+const puppeteer = require('puppeteer');
 
 // ── FIREBASE INIT ──────────────────────────────────────
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: 'rcg-payroll.firebasestorage.app'
+});
 const db = admin.firestore();
+const bucket = admin.storage().bucket();
 
 // ── LINE CONFIG ────────────────────────────────────────
 const lineClient = new line.messagingApi.MessagingApiClient({
@@ -63,6 +68,24 @@ async function getPayroll() {
   const snap = await db.collection('config').doc('payroll').get();
   if (!snap.exists) return {};
   return JSON.parse(snap.data().data || '{}');
+}
+async function getBranches() {
+  const snap = await db.collection('config').doc('branches').get();
+  if (!snap.exists) return [];
+  return JSON.parse(snap.data().data || '[]');
+}
+async function getCompany() {
+  const snap = await db.collection('config').doc('company').get();
+  if (!snap.exists) return {};
+  return snap.data();
+}
+async function getDocRequests() {
+  const snap = await db.collection('config').doc('docRequests').get();
+  if (!snap.exists) return [];
+  return JSON.parse(snap.data().data || '[]');
+}
+async function saveDocRequests(docs) {
+  await db.collection('config').doc('docRequests').set({ data: JSON.stringify(docs), updatedAt: Date.now() });
 }
 function fmt(n) {
   const v = parseFloat(n) || 0;
@@ -269,19 +292,149 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
+// Get branches list for LIFF
+app.get('/api/branches', async (req, res) => {
+  try {
+    const branches = await getBranches();
+    res.json({ ok: true, branches: branches.map(b => ({ id: b.id, name: b.name })) });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
 app.post('/api/document-request', async (req, res) => {
   try {
-    const { staffId, lineUserId, docType, note } = req.body;
+    const { staffId, lineUserId, docType, branchId, showSalary, month, year, note } = req.body;
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff || staff.lineUserId !== lineUserId) return res.json({ ok: false, msg: 'Unauthorized' });
-    const docReq = { id: 'DOC' + Date.now(), staffId, docType, note: note || '', status: 'pending', source: 'line', createdAt: new Date().toISOString() };
-    const snap = await db.collection('config').doc('docRequests').get();
-    const existing = snap.exists ? JSON.parse(snap.data().data || '[]') : [];
+    const docReq = {
+      id: 'DOC' + Date.now(),
+      staffId,
+      docType,
+      branchId: branchId || null,
+      showSalary: showSalary !== false,
+      month: month || null,
+      year: year || null,
+      note: note || '',
+      status: 'pending',
+      source: 'line',
+      createdAt: new Date().toISOString()
+    };
+    const existing = await getDocRequests();
     existing.push(docReq);
-    await db.collection('config').doc('docRequests').set({ data: JSON.stringify(existing), updatedAt: Date.now() });
+    await saveDocRequests(existing);
     await notifyAdminDoc(staff, docReq);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+// Approve document — generate PDF and send to staff
+app.post('/api/approve-document', async (req, res) => {
+  try {
+    const { docId } = req.body;
+    const docs = await getDocRequests();
+    const doc = docs.find(d => d.id === docId);
+    if (!doc) return res.json({ ok: false, msg: 'Request not found' });
+
+    const allStaff = await getAllStaff();
+    const staff = allStaff.find(s => s.id === doc.staffId);
+    if (!staff) return res.json({ ok: false, msg: 'Staff not found' });
+    if (!staff.lineUserId) return res.json({ ok: false, msg: 'Staff has no LINE ID' });
+
+    const company = await getCompany();
+    const branches = await getBranches();
+    const branch = branches.find(b => b.id === doc.branchId) || {};
+
+    // Build HTML for PDF
+    let html = '';
+    if (doc.docType === 'payslip') {
+      const payroll = await getPayroll();
+      const key = `${doc.year}_${doc.month}`;
+      const entry = payroll[key] && payroll[key][doc.staffId] || {};
+      html = buildPaySlipHTML(staff, entry, doc.month, doc.year, company);
+    } else {
+      html = buildCertHTML(staff, branch, company, doc.showSalary, new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }));
+    }
+
+    // Generate PDF with puppeteer
+    const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    const pdfBuffer = await page.pdf({ format: 'A4', printBackground: true, margin: { top: '20mm', bottom: '20mm', left: '20mm', right: '20mm' } });
+    await browser.close();
+
+    // Upload to Firebase Storage
+    const fileName = `documents/${doc.id}_${doc.docType}.pdf`;
+    const file = bucket.file(fileName);
+    await file.save(pdfBuffer, { metadata: { contentType: 'application/pdf' } });
+    // Make public and get URL
+    await file.makePublic();
+    const downloadUrl = `https://storage.googleapis.com/rcg-payroll.firebasestorage.app/${fileName}`;
+
+    // Update doc status
+    const idx = docs.findIndex(d => d.id === docId);
+    docs[idx].status = 'approved';
+    docs[idx].downloadUrl = downloadUrl;
+    docs[idx].approvedAt = new Date().toISOString();
+    await saveDocRequests(docs);
+
+    // Send LINE message to staff
+    const docLabel = doc.docType === 'payslip' ? 'สลิปเงินเดือน' : 'หนังสือรับรองการทำงาน';
+    await lineClient.pushMessage({
+      to: staff.lineUserId,
+      messages: [{
+        type: 'flex',
+        altText: `📄 ${docLabel} พร้อมแล้ว!`,
+        contents: {
+          type: 'bubble',
+          header: { type: 'box', layout: 'vertical', backgroundColor: '#1e3a5f', paddingAll: '16px',
+            contents: [{ type: 'text', text: `📄 ${docLabel}`, color: '#fde68a', weight: 'bold', size: 'lg' }]
+          },
+          body: { type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '18px',
+            contents: [
+              { type: 'text', text: `สวัสดี ${staff.nn} 👋`, weight: 'bold' },
+              { type: 'text', text: `${docLabel}ของคุณพร้อมให้ดาวน์โหลดแล้ว`, size: 'sm', color: '#6b7280', wrap: true, margin: 'sm' },
+              { type: 'text', text: '⚠️ ลิงก์ใช้ได้ 7 วัน', size: 'xs', color: '#f59e0b', margin: 'sm' }
+            ]
+          },
+          footer: { type: 'box', layout: 'vertical', paddingAll: '12px',
+            contents: [{
+              type: 'button', style: 'primary', color: '#1e3a5f',
+              action: { type: 'uri', label: '📥 ดาวน์โหลดเอกสาร', uri: downloadUrl }
+            }]
+          }
+        }
+      }]
+    });
+
+    res.json({ ok: true, downloadUrl });
+  } catch (e) {
+    console.error('approve-document error:', e);
+    res.status(500).json({ ok: false, msg: e.message });
+  }
+});
+
+// Reject document request
+app.post('/api/reject-document', async (req, res) => {
+  try {
+    const { docId } = req.body;
+    const docs = await getDocRequests();
+    const idx = docs.findIndex(d => d.id === docId);
+    if (idx < 0) return res.json({ ok: false, msg: 'Not found' });
+    const staff = (await getAllStaff()).find(s => s.id === docs[idx].staffId);
+    docs[idx].status = 'rejected';
+    await saveDocRequests(docs);
+    if (staff && staff.lineUserId) {
+      await lineClient.pushMessage({ to: staff.lineUserId, messages: [{ type: 'text', text: `❌ คำขอเอกสารของคุณไม่ได้รับการอนุมัติ\nกรุณาติดต่อ HR หากมีข้อสงสัย` }] });
+    }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+// Get pending doc requests (for web app)
+app.get('/api/doc-requests', async (req, res) => {
+  try {
+    const docs = await getDocRequests();
+    res.json({ ok: true, docs });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
@@ -408,6 +561,98 @@ app.get('/debug/payroll', async (req, res) => {
     res.json({ keys, sample });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── PDF HTML BUILDERS ─────────────────────────────────
+function fmtN(n) { const v = parseFloat(n)||0; if(v===Math.round(v))return Math.round(v).toLocaleString(); return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+function buildPaySlipHTML(staff, entry, month, year, company) {
+  const MTH2 = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const period = `${MTH2[parseInt(month)-1]} ${year}`;
+  const net = parseFloat(entry.net)||0;
+  const bG = parseFloat(entry.bG)||(parseFloat(entry.snap&&entry.snap.base)||0);
+  const gross = parseFloat(entry.gross)||0;
+  const sso = parseFloat(entry.sso)||0;
+  const mT = parseFloat(entry.mT)||0;
+  const whtD = parseFloat(entry.whtD)||0;
+  const adv = parseFloat(entry.adv)||0;
+  const dO = parseFloat(entry.dOth)||0;
+  const bon = parseFloat(entry.bonus)||0;
+  const otA = parseFloat(entry.otA)||0;
+  const otH = parseFloat(entry.otHrs)||0;
+  const dL = parseFloat(entry.dL)||0;
+  const isPerm = (entry.snap&&entry.snap.ct||staff.ct) === 'permanent';
+  const cth = (company&&company.cth)||'ReadyCheckGo';
+  const sgn = (company&&company.sgn)||'';
+  const today = new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'});
+
+  let rows = '';
+  rows += `<tr><td>Base Salary</td><td style="text-align:right">${fmtN(bG)} ฿</td></tr>`;
+  if(otA>0) rows += `<tr><td>OT (${otH} hrs)</td><td style="text-align:right">${fmtN(otA)} ฿</td></tr>`;
+  if(bon>0) rows += `<tr><td>Bonus</td><td style="text-align:right">${fmtN(bon)} ฿</td></tr>`;
+  rows += `<tr style="font-weight:700;border-top:1.5px solid #374151"><td>Total Income</td><td style="text-align:right">${fmtN(gross)} ฿</td></tr>`;
+  if(isPerm) {
+    if(sso>0) rows += `<tr style="color:#6b7280"><td>SSO (5%)</td><td style="text-align:right">−${fmtN(sso)} ฿</td></tr>`;
+    if(mT>0) rows += `<tr style="color:#6b7280"><td>Income Tax ภงด.1</td><td style="text-align:right">−${fmtN(mT)} ฿</td></tr>`;
+  } else {
+    if(whtD>0) rows += `<tr style="color:#6b7280"><td>WHT 3%</td><td style="text-align:right">−${fmtN(whtD)} ฿</td></tr>`;
+  }
+  if(dL>0) rows += `<tr style="color:#6b7280"><td>Leave Deduction</td><td style="text-align:right">−${fmtN(dL)} ฿</td></tr>`;
+  if(adv>0) rows += `<tr style="color:#6b7280"><td>Advance</td><td style="text-align:right">−${fmtN(adv)} ฿</td></tr>`;
+  if(dO>0) rows += `<tr style="color:#6b7280"><td>Other Deductions</td><td style="text-align:right">−${fmtN(dO)} ฿</td></tr>`;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>body{font-family:'Sarabun',sans-serif;font-size:13px;color:#1a1a2e;padding:0;margin:0}
+    .wrap{max-width:540px;margin:auto;padding:28px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    td{padding:5px 0}
+    .hdr{border-bottom:2px solid #1e3a5f;padding-bottom:10px;margin-bottom:14px}
+    .net{background:#1e3a5f;color:#fff;border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+    .sig{margin-top:32px;text-align:right}
+    </style></head><body><div class="wrap">
+    <div class="hdr"><div style="font-size:14px;font-weight:700;color:#1e3a5f">${cth}</div>
+    <div style="font-size:12px;color:#6b7280">Pay Slip — ${period}</div></div>
+    <table style="margin-bottom:12px;font-size:12px"><tr><td><b>ID:</b> ${staff.id}</td><td><b>Name:</b> ${staff.fn} ${staff.ln}</td></tr>
+    <tr><td><b>Position:</b> ${staff.pos}</td><td><b>Contract:</b> ${isPerm?'Permanent (ภงด.1)':staff.ct}</td></tr></table>
+    <table>${rows}</table>
+    <div class="net"><b style="font-size:14px">NET PAY</b><b style="font-size:22px;color:#fde68a">${fmtN(net)} ฿</b></div>
+    <div class="sig"><div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div>
+    <div style="font-weight:600">${sgn}</div><div style="font-size:11px;color:#6b7280">${today}</div></div>
+    </div></body></html>`;
+}
+
+function buildCertHTML(staff, branch, company, showSalary, dateStr) {
+  const cth = (company&&company.cth)||'ReadyCheckGo';
+  const addr = (company&&company.addr)||'';
+  const sgn = (company&&company.sgn)||'';
+  const cn = branch.certname||branch.name||'';
+  const sd = staff.sd ? new Date(staff.sd).toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'}) : '';
+  const yrs = staff.sd ? Math.floor((Date.now()-new Date(staff.sd))/(365.25*24*60*60*1000)) : 0;
+  const mos = staff.sd ? Math.floor(((Date.now()-new Date(staff.sd))%(365.25*24*60*60*1000))/(30.44*24*60*60*1000)) : 0;
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>body{font-family:'Sarabun',sans-serif;font-size:14px;color:#1a1a2e;line-height:2}
+    .wrap{max-width:540px;margin:auto;padding:28px}
+    .sig{margin-top:40px;text-align:right}
+    </style></head><body><div class="wrap">
+    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px;border-bottom:2px solid #1e3a5f;padding-bottom:10px">
+      <div><div style="font-weight:700">${cn}</div>${branch.lic?`<div>เลขที่ใบอนุญาต ${branch.lic}</div>`:''}</div>
+      <div style="text-align:right"><div style="font-weight:700">${cth}</div><div style="color:#6b7280;white-space:pre-line">${addr}</div></div>
+    </div>
+    <div style="text-align:center;margin-bottom:16px"><div style="font-size:16px;font-weight:700;text-decoration:underline;color:#1e3a5f">หนังสือรับรองพนักงาน</div></div>
+    <div style="text-align:right;font-size:12px;color:#6b7280;margin-bottom:16px">ออกให้ ณ วันที่ ${dateStr}</div>
+    <p>หนังสือฉบับนี้ออกให้เพื่อรับรองว่า <b>${staff.fn} ${staff.ln}</b> เป็นพนักงานของ${cth}</p>
+    <p>ตำแหน่ง <b>${staff.pos} · ${staff.dept}</b></p>
+    ${cn?`<p>ที่${cn}</p>`:''}
+    ${showSalary&&staff.base?`<p>มีอัตราเงินเดือนล่าสุด <b>${fmtN(staff.base)} บาทต่อเดือน</b></p>`:''}
+    <p>เริ่มงาน ${sd} จนถึงปัจจุบัน</p>
+    <p>อายุงาน: ${yrs} ปี ${mos} เดือน</p>
+    <p>จึงเรียนมาเพื่อทราบ</p>
+    <div class="sig"><div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div>
+    <div style="font-weight:600">${sgn}</div><div style="font-size:12px;color:#6b7280">${dateStr}</div></div>
+    </div></body></html>`;
+}
 
 // ── START ──────────────────────────────────────────────
 app.listen(PORT, () => {
