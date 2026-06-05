@@ -202,9 +202,32 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
     <div class="card">
       <div class="fr">
         <label>ประเภทเอกสาร / Document Type</label>
-        <select id="doc-type">
+        <select id="doc-type" onchange="onDocTypeChange()">
           <option value="payslip">สลิปเงินเดือน (Pay Slip)</option>
           <option value="cert">หนังสือรับรองการทำงาน (Employment Certificate)</option>
+        </select>
+      </div>
+      <!-- Pay Slip: choose period -->
+      <div id="doc-period-row" class="fr">
+        <label>เดือน / Period</label>
+        <div style="display:flex;gap:8px">
+          <select id="doc-month" style="flex:1"></select>
+          <select id="doc-year" style="width:100px"></select>
+        </div>
+      </div>
+      <!-- Branch selector (both types) -->
+      <div class="fr">
+        <label>สาขา / Branch</label>
+        <select id="doc-branch">
+          <option value="">กำลังโหลด...</option>
+        </select>
+      </div>
+      <!-- Cert only: show salary toggle -->
+      <div id="doc-salary-row" style="display:none" class="fr">
+        <label>แสดงเงินเดือนในเอกสาร / Show Salary</label>
+        <select id="doc-show-salary">
+          <option value="yes">แสดง (Yes)</option>
+          <option value="no">ไม่แสดง (No)</option>
         </select>
       </div>
       <div class="fr">
@@ -257,6 +280,7 @@ async function init() {
     document.getElementById('home-greeting').textContent = `สวัสดี ${currentStaff.nn} 👋`;
     document.getElementById('home-subtext').textContent = `${currentStaff.pos} · ${currentStaff.dept}`;
     setupSalarySelectors();
+    setupDocSelectors();
     // Load leave balance
     loadLeaveBalance();
     hideLoading();
@@ -434,11 +458,57 @@ async function loadSalary() {
 }
 
 // ── DOCUMENT REQUEST ───────────────────────────────────
+function onDocTypeChange() {
+  const type = document.getElementById('doc-type').value;
+  document.getElementById('doc-period-row').style.display = type === 'payslip' ? 'block' : 'none';
+  document.getElementById('doc-salary-row').style.display = type === 'cert' ? 'block' : 'none';
+}
+
+async function loadBranches() {
+  try {
+    const res = await fetch(`${API}/api/branches`);
+    const data = await res.json();
+    const sel = document.getElementById('doc-branch');
+    if (data.ok && data.branches.length) {
+      sel.innerHTML = data.branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
+    } else {
+      sel.innerHTML = '<option value="">No branches found</option>';
+    }
+  } catch (e) {
+    document.getElementById('doc-branch').innerHTML = '<option value="">Error loading branches</option>';
+  }
+}
+
+function setupDocSelectors() {
+  const now = new Date();
+  const msel = document.getElementById('doc-month');
+  const ysel = document.getElementById('doc-year');
+  MTH_TH.forEach((m, i) => {
+    const o = document.createElement('option');
+    o.value = i + 1; o.textContent = m;
+    if (i + 1 === now.getMonth() + 1) o.selected = true;
+    msel.appendChild(o);
+  });
+  const y = now.getFullYear();
+  [y-1, y].forEach(yr => {
+    const o = document.createElement('option');
+    o.value = yr; o.textContent = yr;
+    if (yr === y) o.selected = true;
+    ysel.appendChild(o);
+  });
+  loadBranches();
+}
+
 async function submitDocRequest() {
   const docType = document.getElementById('doc-type').value;
+  const branchId = document.getElementById('doc-branch').value;
   const note = document.getElementById('doc-note').value.trim();
+  const showSalary = document.getElementById('doc-show-salary').value !== 'no';
+  const month = document.getElementById('doc-month').value;
+  const year = document.getElementById('doc-year').value;
   const msg = document.getElementById('doc-msg');
   const btn = document.getElementById('btn-submit-doc');
+  if (!branchId) { showMsg(msg, 'กรุณาเลือกสาขา', 'red'); return; }
   btn.disabled = true; btn.textContent = '⏳ กำลังส่ง...';
   try {
     const res = await fetch(`${API}/api/document-request`, {
@@ -447,7 +517,10 @@ async function submitDocRequest() {
       body: JSON.stringify({
         staffId: currentStaff.id,
         lineUserId: lineProfile.userId,
-        docType, note
+        docType, branchId, showSalary,
+        month: docType === 'payslip' ? month : null,
+        year: docType === 'payslip' ? year : null,
+        note
       })
     });
     const data = await res.json();
