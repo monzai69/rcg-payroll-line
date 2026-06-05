@@ -79,6 +79,16 @@ async function getCompany() {
   if (!snap.exists) return {};
   return snap.data();
 }
+async function getLogos() {
+  const snap = await db.collection('config').doc('logos').get();
+  if (!snap.exists) return { rcg: null, clinic: null, mode: 'rcg' };
+  return snap.data();
+}
+async function getSigStamp() {
+  const snap = await db.collection('config').doc('sigstamp').get();
+  if (!snap.exists) return { sig: null, stamp: null, showStamp: true };
+  return snap.data();
+}
 async function getDocRequests() {
   const snap = await db.collection('config').doc('docRequests').get();
   if (!snap.exists) return [];
@@ -334,6 +344,7 @@ app.post('/api/approve-document', async (req, res) => {
     const docs = await getDocRequests();
     const doc = docs.find(d => d.id === docId);
     if (!doc) return res.json({ ok: false, msg: 'Request not found' });
+    if (doc.status !== 'pending') return res.json({ ok: false, msg: 'Already processed' });
 
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === doc.staffId);
@@ -343,6 +354,8 @@ app.post('/api/approve-document', async (req, res) => {
     const company = await getCompany();
     const branches = await getBranches();
     const branch = branches.find(b => b.id === doc.branchId) || {};
+    const logos = await getLogos();
+    const sigstamp = await getSigStamp();
 
     // Build HTML for PDF
     let html = '';
@@ -350,9 +363,9 @@ app.post('/api/approve-document', async (req, res) => {
       const payroll = await getPayroll();
       const key = `${doc.year}_${doc.month}`;
       const entry = payroll[key] && payroll[key][doc.staffId] || {};
-      html = buildPaySlipHTML(staff, entry, doc.month, doc.year, company);
+      html = buildPaySlipHTML(staff, entry, doc.month, doc.year, company, logos, sigstamp);
     } else {
-      html = buildCertHTML(staff, branch, company, doc.showSalary, new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }));
+      html = buildCertHTML(staff, branch, company, doc.showSalary, new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }), logos, sigstamp);
     }
 
     // Generate PDF with puppeteer
@@ -565,7 +578,36 @@ app.get('/debug/payroll', async (req, res) => {
 // ── PDF HTML BUILDERS ─────────────────────────────────
 function fmtN(n) { const v = parseFloat(n)||0; if(v===Math.round(v))return Math.round(v).toLocaleString(); return v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
-function buildPaySlipHTML(staff, entry, month, year, company) {
+function buildLogoHeaderHTML(logos) {
+  if (!logos) return '';
+  const mode = logos.mode || 'rcg';
+  const left = logos.rcg, right = logos.clinic;
+  if (mode === 'none') return '';
+  if (mode === 'rcg') {
+    if (!right) return '';
+    return `<div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:10px"><img src="${right}" style="max-height:52px;max-width:160px;object-fit:contain"></div>`;
+  }
+  if (mode === 'both') {
+    if (!left && !right) return '';
+    if (!left) return `<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><img src="${right}" style="max-height:52px;max-width:160px;object-fit:contain"></div>`;
+    if (!right) return `<div style="display:flex;justify-content:flex-start;margin-bottom:10px"><img src="${left}" style="max-height:52px;max-width:160px;object-fit:contain"></div>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><img src="${left}" style="max-height:52px;max-width:140px;object-fit:contain"><img src="${right}" style="max-height:52px;max-width:140px;object-fit:contain"></div>`;
+  }
+  return '';
+}
+
+function buildSigBlockHTML(sigstamp, sgn, dateStr) {
+  if (!sigstamp) return `<div style="text-align:right;margin-top:32px"><div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div><div style="font-weight:600">${sgn}</div><div style="font-size:11px;color:#6b7280">${dateStr}</div></div>`;
+  const showStamp = sigstamp.showStamp !== false;
+  const sigImg = sigstamp.sig ? `<img src="${sigstamp.sig}" style="max-height:52px;max-width:150px;object-fit:contain;display:block;margin:0 auto 2px">` : `<div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div>`;
+  const sigBlock = `<div style="text-align:center"><div style="display:inline-block;text-align:center">${sigImg}<div style="font-weight:600">${sgn}</div><div style="font-size:11px;color:#6b7280">${dateStr}</div></div></div>`;
+  if (showStamp && sigstamp.stamp) {
+    return `<div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:20px;margin-top:32px">${sigBlock}<img src="${sigstamp.stamp}" style="max-height:80px;max-width:80px;object-fit:contain;opacity:.9"></div>`;
+  }
+  return `<div style="display:flex;justify-content:flex-end;margin-top:32px">${sigBlock}</div>`;
+}
+
+function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp) {
   const MTH2 = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const period = `${MTH2[parseInt(month)-1]} ${year}`;
   const net = parseFloat(entry.net)||0;
@@ -584,6 +626,8 @@ function buildPaySlipHTML(staff, entry, month, year, company) {
   const cth = (company&&company.cth)||'ReadyCheckGo';
   const sgn = (company&&company.sgn)||'';
   const today = new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'});
+  const logoHtml = buildLogoHeaderHTML(logos);
+  const sigHtml = buildSigBlockHTML(sigstamp, sgn, today);
 
   let rows = '';
   rows += `<tr><td>Base Salary</td><td style="text-align:right">${fmtN(bG)} ฿</td></tr>`;
@@ -608,20 +652,19 @@ function buildPaySlipHTML(staff, entry, month, year, company) {
     td{padding:5px 0}
     .hdr{border-bottom:2px solid #1e3a5f;padding-bottom:10px;margin-bottom:14px}
     .net{background:#1e3a5f;color:#fff;border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:12px}
-    .sig{margin-top:32px;text-align:right}
     </style></head><body><div class="wrap">
+    ${logoHtml}
     <div class="hdr"><div style="font-size:14px;font-weight:700;color:#1e3a5f">${cth}</div>
     <div style="font-size:12px;color:#6b7280">Pay Slip — ${period}</div></div>
     <table style="margin-bottom:12px;font-size:12px"><tr><td><b>ID:</b> ${staff.id}</td><td><b>Name:</b> ${staff.fn} ${staff.ln}</td></tr>
     <tr><td><b>Position:</b> ${staff.pos}</td><td><b>Contract:</b> ${isPerm?'Permanent (ภงด.1)':staff.ct}</td></tr></table>
     <table>${rows}</table>
     <div class="net"><b style="font-size:14px">NET PAY</b><b style="font-size:22px;color:#fde68a">${fmtN(net)} ฿</b></div>
-    <div class="sig"><div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div>
-    <div style="font-weight:600">${sgn}</div><div style="font-size:11px;color:#6b7280">${today}</div></div>
+    ${sigHtml}
     </div></body></html>`;
 }
 
-function buildCertHTML(staff, branch, company, showSalary, dateStr) {
+function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp) {
   const cth = (company&&company.cth)||'ReadyCheckGo';
   const addr = (company&&company.addr)||'';
   const sgn = (company&&company.sgn)||'';
@@ -629,13 +672,15 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr) {
   const sd = staff.sd ? new Date(staff.sd).toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'}) : '';
   const yrs = staff.sd ? Math.floor((Date.now()-new Date(staff.sd))/(365.25*24*60*60*1000)) : 0;
   const mos = staff.sd ? Math.floor(((Date.now()-new Date(staff.sd))%(365.25*24*60*60*1000))/(30.44*24*60*60*1000)) : 0;
+  const logoHtml = buildLogoHeaderHTML(logos);
+  const sigHtml = buildSigBlockHTML(sigstamp, sgn, dateStr);
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <style>body{font-family:'Sarabun',sans-serif;font-size:14px;color:#1a1a2e;line-height:2}
     .wrap{max-width:540px;margin:auto;padding:28px}
-    .sig{margin-top:40px;text-align:right}
     </style></head><body><div class="wrap">
+    ${logoHtml}
     <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px;border-bottom:2px solid #1e3a5f;padding-bottom:10px">
       <div><div style="font-weight:700">${cn}</div>${branch.lic?`<div>เลขที่ใบอนุญาต ${branch.lic}</div>`:''}</div>
       <div style="text-align:right"><div style="font-weight:700">${cth}</div><div style="color:#6b7280;white-space:pre-line">${addr}</div></div>
@@ -649,8 +694,7 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr) {
     <p>เริ่มงาน ${sd} จนถึงปัจจุบัน</p>
     <p>อายุงาน: ${yrs} ปี ${mos} เดือน</p>
     <p>จึงเรียนมาเพื่อทราบ</p>
-    <div class="sig"><div style="border-bottom:1.5px solid #9ca3af;width:180px;margin-left:auto;margin-bottom:6px"></div>
-    <div style="font-weight:600">${sgn}</div><div style="font-size:12px;color:#6b7280">${dateStr}</div></div>
+    ${sigHtml}
     </div></body></html>`;
 }
 
