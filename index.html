@@ -54,6 +54,39 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
   <div style="color:#6b7280;font-size:14px">กำลังโหลด...</div>
 </div>
 
+<!-- REGISTER SCREEN -->
+<div class="screen" id="screen-register">
+  <div class="header">
+    <h1>ลงทะเบียน</h1>
+    <p>Register LINE Account</p>
+  </div>
+  <div class="body">
+    <div class="card" style="margin-bottom:14px;background:#eff6ff;border:1.5px solid #bfdbfe">
+      <div style="font-size:13px;font-weight:700;color:#1e40af;margin-bottom:4px">📱 เชื่อมต่อ LINE กับบัญชีพนักงาน</div>
+      <div style="font-size:12px;color:#3b82f6">เลือกชื่อของคุณและยืนยันด้วยเบอร์โทรศัพท์ 4 หลักสุดท้าย</div>
+    </div>
+    <div class="card">
+      <div class="fr">
+        <label>ชื่อพนักงาน / Your Name</label>
+        <select id="reg-staff">
+          <option value="">-- กำลังโหลด... --</option>
+        </select>
+      </div>
+      <div id="reg-staff-preview" style="display:none;background:#f8fafc;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px">
+        <div id="reg-staff-info"></div>
+      </div>
+      <div class="fr">
+        <label>เบอร์โทร 4 หลักสุดท้าย / Last 4 digits of phone</label>
+        <input type="tel" id="reg-phone" maxlength="4" placeholder="e.g. 5678" style="letter-spacing:6px;font-size:18px;font-weight:700;text-align:center">
+      </div>
+      <div id="reg-msg" style="display:none" class="alert"></div>
+    </div>
+    <button class="btn btn-primary" onclick="submitRegister()" id="btn-submit-reg">
+      ✅ ยืนยันลงทะเบียน / Confirm
+    </button>
+  </div>
+</div>
+
 <!-- NOT REGISTERED -->
 <div class="screen" id="screen-notregistered">
   <div class="header">
@@ -63,8 +96,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
   <div class="body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;text-align:center">
     <div style="font-size:50px;margin-bottom:16px">🔐</div>
     <div style="font-size:18px;font-weight:700;margin-bottom:8px;color:#1e3a5f">ยังไม่ได้ลงทะเบียน</div>
-    <div style="font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px">กรุณาลงทะเบียนก่อนใช้งาน<br>พิมพ์ใน LINE Chat:<br><b style="color:#1e3a5f">register [รหัสพนักงาน]</b><br><br>ติดต่อ HR เพื่อขอรหัสพนักงาน</div>
-    <button class="btn btn-primary" onclick="liff.closeWindow()">ปิด</button>
+    <div style="font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px">กรุณาลงทะเบียนก่อนใช้งานระบบ<br>ใช้เบอร์โทรศัพท์ยืนยันตัวตน</div>
+    <button class="btn btn-primary" style="width:100%;max-width:280px;margin-bottom:12px" onclick="showScreen('register');loadUnregisteredStaff()">📱 ลงทะเบียนเลย</button>
+    <button class="btn btn-gray" onclick="liff.closeWindow()">ปิด</button>
   </div>
 </div>
 
@@ -457,7 +491,64 @@ async function loadSalary() {
   }
 }
 
-// ── DOCUMENT REQUEST ───────────────────────────────────
+// ── REGISTRATION ───────────────────────────────────────
+async function loadUnregisteredStaff() {
+  try {
+    const res = await fetch(`${API}/api/unregistered-staff`);
+    const data = await res.json();
+    const sel = document.getElementById('reg-staff');
+    if (data.ok && data.staff.length) {
+      sel.innerHTML = '<option value="">-- เลือกชื่อของคุณ --</option>' +
+        data.staff.map(s => `<option value="${s.id}">${s.nn} ${s.fn} (${s.dept})</option>`).join('');
+    } else {
+      sel.innerHTML = '<option value="">ไม่พบรายชื่อพนักงาน</option>';
+    }
+  } catch (e) {
+    document.getElementById('reg-staff').innerHTML = '<option value="">เกิดข้อผิดพลาด</option>';
+  }
+  // Wire up change handler after loading
+  const sel = document.getElementById('reg-staff');
+  if (sel) {
+    sel.onchange = function() {
+      const preview = document.getElementById('reg-staff-preview');
+      const info = document.getElementById('reg-staff-info');
+      if (!this.value) { preview.style.display = 'none'; return; }
+      const opt = this.options[this.selectedIndex];
+      preview.style.display = 'block';
+      info.innerHTML = `<div style="font-weight:700;font-size:14px;color:#1e3a5f">${opt.text}</div><div style="font-size:12px;color:#6b7280;margin-top:3px">ถ้าใช่ กรอกเบอร์โทร 4 หลักสุดท้ายด้านล่าง</div>`;
+    };
+  }
+}
+
+async function submitRegister() {
+  const staffId = document.getElementById('reg-staff').value;
+  const last4 = document.getElementById('reg-phone').value.trim();
+  const msg = document.getElementById('reg-msg');
+  const btn = document.getElementById('btn-submit-reg');
+  if (!staffId) { showMsg(msg, 'กรุณาเลือกชื่อของคุณ', 'red'); return; }
+  if (last4.length !== 4 || !/^\d{4}$/.test(last4)) { showMsg(msg, 'กรุณากรอกตัวเลข 4 หลักสุดท้ายของเบอร์โทร', 'red'); return; }
+  btn.disabled = true; btn.textContent = '⏳ กำลังตรวจสอบ...';
+  try {
+    const res = await fetch(`${API}/api/register-by-phone`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffId, last4, lineUserId: lineProfile.userId })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      // Reload init to get proper staff data
+      currentStaff = data.staff;
+      document.getElementById('home-greeting').textContent = `สวัสดี ${data.staff.nn} 👋`;
+      document.getElementById('home-subtext').textContent = `${data.staff.pos} · ${data.staff.dept}`;
+      showScreen('home');
+    } else {
+      showMsg(msg, '❌ ' + data.msg, 'red');
+    }
+  } catch (e) {
+    showMsg(msg, '❌ เกิดข้อผิดพลาด กรุณาลองใหม่', 'red');
+  }
+  btn.disabled = false; btn.textContent = '✅ ยืนยันลงทะเบียน / Confirm';
+}
 function onDocTypeChange() {
   const type = document.getElementById('doc-type').value;
   document.getElementById('doc-period-row').style.display = type === 'payslip' ? 'block' : 'none';
@@ -550,8 +641,13 @@ function fmt(n) {
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// Start
-init();
+// Start — wait for LIFF SDK to be ready
+function waitForLiff(cb, retries = 20) {
+  if (typeof liff !== 'undefined') { cb(); }
+  else if (retries > 0) { setTimeout(() => waitForLiff(cb, retries - 1), 200); }
+  else { console.error('LIFF SDK failed to load'); }
+}
+waitForLiff(init);
 </script>
 </body>
 </html>
