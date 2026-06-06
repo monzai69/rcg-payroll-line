@@ -302,7 +302,41 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
-// Get branches list for LIFF
+// Get unregistered active non-parttime staff with phone
+app.get('/api/unregistered-staff', async (req, res) => {
+  try {
+    const allStaff = await getAllStaff();
+    const unregistered = allStaff.filter(s =>
+      s.st === 'Active' &&
+      s.emptype !== 'parttime' &&
+      !s.lineUserId &&
+      s.phone && s.phone.length >= 4
+    ).map(s => ({ id: s.id, fn: s.fn, nn: s.nn, dept: s.dept, pos: s.pos }));
+    res.json({ ok: true, staff: unregistered });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+// Register by phone last 4 digits
+app.post('/api/register-by-phone', async (req, res) => {
+  try {
+    const { staffId, last4, lineUserId } = req.body;
+    if (!staffId || !last4 || !lineUserId) return res.json({ ok: false, msg: 'Missing fields' });
+    const allStaff = await getAllStaff();
+    const staff = allStaff.find(s => s.id === staffId);
+    if (!staff) return res.json({ ok: false, msg: 'ไม่พบรหัสพนักงาน' });
+    if (!staff.phone) return res.json({ ok: false, msg: 'ไม่มีเบอร์โทรในระบบ กรุณาติดต่อ HR' });
+    // Check last 4 digits
+    const phoneLast4 = staff.phone.replace(/\D/g, '').slice(-4);
+    if (phoneLast4 !== last4) return res.json({ ok: false, msg: 'เบอร์โทรไม่ตรงกัน กรุณาลองใหม่' });
+    // Check not already registered by someone else
+    const alreadyLinked = allStaff.find(s => s.lineUserId === lineUserId && s.id !== staffId);
+    if (alreadyLinked) return res.json({ ok: false, msg: 'LINE นี้ลงทะเบียนกับพนักงานคนอื่นแล้ว' });
+    // Link LINE ID
+    staff.lineUserId = lineUserId;
+    await db.collection('config').doc('staff').set({ data: JSON.stringify(allStaff), updatedAt: Date.now() });
+    res.json({ ok: true, staff: { id: staff.id, fn: staff.fn, ln: staff.ln, nn: staff.nn, dept: staff.dept, pos: staff.pos } });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
 app.get('/api/branches', async (req, res) => {
   try {
     const branches = await getBranches();
