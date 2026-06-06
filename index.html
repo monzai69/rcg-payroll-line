@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>RCG Staff Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700;800&display=swap" rel="stylesheet">
-<script src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Sarabun',sans-serif;background:#f4f6f8;color:#1a1a2e;font-size:15px;min-height:100vh}
@@ -306,7 +306,12 @@ async function init() {
     const data = await res.json();
     if (!data.ok) {
       hideLoading();
-      showScreen('notregistered');
+      if (page === 'register') {
+        showScreen('register');
+        loadUnregisteredStaff();
+      } else {
+        showScreen('notregistered');
+      }
       return;
     }
     currentStaff = data.staff;
