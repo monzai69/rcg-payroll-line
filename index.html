@@ -159,6 +159,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
           <option value="annual">Annual Leave (ลาพักร้อน)</option>
           <option value="sick">Sick Leave (ลาป่วย)</option>
           <option value="business">Business Leave (ลากิจ)</option>
+          <option value="carryover">Carryover Leave (ลาสะสม)</option>
+          <option value="lwop">LWOP — ลาไม่รับค่าจ้าง</option>
           <option value="custom">Other (อื่นๆ)</option>
         </select>
       </div>
@@ -190,6 +192,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
       </div>
       <div id="leave-sick-note" style="display:none" class="alert alert-yellow">
         ⚠️ การลาป่วย 2 วันขึ้นไปติดต่อกัน ต้องแนบใบรับรองแพทย์<br>กรุณาส่งรูปใบรับรองแพทย์ให้ HR ทาง LINE
+      </div>
+      <div id="leave-lwop-note" style="display:none" class="alert alert-red">
+        ⚠️ LWOP — ลาไม่รับค่าจ้าง<br>วันที่ลาจะถูกหักออกจากเงินเดือนเต็มจำนวน
       </div>
       <div id="leave-msg" style="display:none" class="alert"></div>
     </div>
@@ -366,6 +371,7 @@ async function loadLeaveBalance() {
 function onLeaveTypeChange() {
   const type = document.getElementById('leave-type').value;
   document.getElementById('leave-custom-row').style.display = type === 'custom' ? 'block' : 'none';
+  document.getElementById('leave-lwop-note').style.display = type === 'lwop' ? 'block' : 'none';
   checkSickNote();
 }
 
