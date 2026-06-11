@@ -270,7 +270,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
         </select>
       </div>
       <div class="fr">
-        <label>หมายเหตุ / Note (optional)</label>
+        <label>ภาษาเอกสาร / Document Language</label>
+        <div style="display:flex;gap:8px">
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600" id="lang-th-lbl">
+            <input type="radio" name="doc-lang" value="th" id="doc-lang-th" checked onchange="onLangChange()" style="accent-color:var(--nv)"> 🇹🇭 ภาษาไทย
+          </label>
+          <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600" id="lang-en-lbl">
+            <input type="radio" name="doc-lang" value="en" id="doc-lang-en" onchange="onLangChange()" style="accent-color:var(--nv)"> 🇬🇧 English
+          </label>
+        </div>
+      </div>
         <textarea id="doc-note" rows="2" placeholder="เช่น ต้องการยื่นธนาคาร"></textarea>
       </div>
       <div id="doc-msg" style="display:none" class="alert"></div>
@@ -560,6 +569,14 @@ async function submitRegister() {
   }
   btn.disabled = false; btn.textContent = '✅ ยืนยันลงทะเบียน / Confirm';
 }
+function onLangChange() {
+  const lang = document.querySelector('input[name="doc-lang"]:checked').value;
+  const thLbl = document.getElementById('lang-th-lbl');
+  const enLbl = document.getElementById('lang-en-lbl');
+  if(thLbl) thLbl.style.borderColor = lang==='th'?'var(--nv)':'#e5e7eb';
+  if(enLbl) enLbl.style.borderColor = lang==='en'?'var(--nv)':'#e5e7eb';
+}
+
 function onDocTypeChange() {
   const type = document.getElementById('doc-type').value;
   document.getElementById('doc-period-row').style.display = type === 'payslip' ? 'block' : 'none';
@@ -608,6 +625,7 @@ async function submitDocRequest() {
   const showSalary = document.getElementById('doc-show-salary').value !== 'no';
   const month = document.getElementById('doc-month').value;
   const year = document.getElementById('doc-year').value;
+  const lang = document.querySelector('input[name="doc-lang"]:checked')?.value || 'th';
   const msg = document.getElementById('doc-msg');
   const btn = document.getElementById('btn-submit-doc');
   if (!branchId) { showMsg(msg, 'กรุณาเลือกสาขา', 'red'); return; }
@@ -619,7 +637,7 @@ async function submitDocRequest() {
       body: JSON.stringify({
         staffId: currentStaff.id,
         lineUserId: lineProfile.userId,
-        docType, branchId, showSalary,
+        docType, branchId, showSalary, lang,
         month: docType === 'payslip' ? month : null,
         year: docType === 'payslip' ? year : null,
         note
