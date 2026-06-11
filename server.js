@@ -723,7 +723,7 @@ function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp, l
 function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp, lang='th') {
   const isEn = lang === 'en';
   const cth = isEn ? (company&&company.cthen)||'Ready Check Go Group Co., Ltd.' : (company&&company.cth)||'ReadyCheckGo';
-  const addr = (company&&company.addr)||'';
+  const addr = isEn ? (company&&company.addren)||company.addr||'' : (company&&company.addr)||'';  
   const sgn = isEn ? (company&&company.sgnen)||company.sgn||'' : (company&&company.sgn)||'';
   const cn = isEn ? (branch.nameEn||branch.certname||branch.name||'') : (branch.certname||branch.name||'');
   const sd = staff.sd ? new Date(staff.sd).toLocaleDateString(isEn?'en-GB':'th-TH',{year:'numeric',month:'long',day:'numeric'}) : '';
@@ -733,8 +733,8 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
   const sigHtml = buildSigBlockHTML(sigstamp, sgn, dateStr);
 
   const content = isEn ? `
-    <p>This is to certify that <b>${staff.fn} ${staff.ln}</b> is an employee of ${cth}.</p>
-    <p>Position: <b>${staff.pos} · ${staff.dept}</b></p>
+  <p>This is to certify that <b>${staff.fn} ${staff.ln}</b> is an employee of ${cth}</p>
+  <p>Position: <b>${staff.pos} · ${staff.dept}</b></p>
     ${cn?`<p>At ${cn}</p>`:''}
     ${showSalary&&staff.base?`<p>Monthly Salary: <b>${fmtN(staff.base)} THB</b></p>`:''}
     <p>Start Date: ${sd}</p>
