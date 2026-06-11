@@ -346,7 +346,7 @@ app.get('/api/branches', async (req, res) => {
 
 app.post('/api/document-request', async (req, res) => {
   try {
-    const { staffId, lineUserId, docType, branchId, showSalary, month, year, note } = req.body;
+    const { staffId, lineUserId, docType, branchId, showSalary, month, year, note, lang } = req.body;
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff || staff.lineUserId !== lineUserId) return res.json({ ok: false, msg: 'Unauthorized' });
@@ -356,6 +356,7 @@ app.post('/api/document-request', async (req, res) => {
       docType,
       branchId: branchId || null,
       showSalary: showSalary !== false,
+      lang: lang || 'th',
       month: month || null,
       year: year || null,
       note: note || '',
@@ -397,9 +398,13 @@ app.post('/api/approve-document', async (req, res) => {
       const payroll = await getPayroll();
       const key = `${doc.year}_${doc.month}`;
       const entry = payroll[key] && payroll[key][doc.staffId] || {};
-      html = buildPaySlipHTML(staff, entry, doc.month, doc.year, company, logos, sigstamp);
+      html = buildPaySlipHTML(staff, entry, doc.month, doc.year, company, logos, sigstamp, doc.lang||'th');
     } else {
-      html = buildCertHTML(staff, branch, company, doc.showSalary, new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' }), logos, sigstamp);
+      const isEn = (doc.lang||'th')==='en';
+      const dateStr = isEn
+        ? new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'})
+        : new Date().toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'});
+      html = buildCertHTML(staff, branch, company, doc.showSalary, dateStr, logos, sigstamp, doc.lang||'th');
     }
 
     // Generate PDF with puppeteer
@@ -641,9 +646,13 @@ function buildSigBlockHTML(sigstamp, sgn, dateStr) {
   return `<div style="display:flex;justify-content:flex-end;margin-top:32px">${sigBlock}</div>`;
 }
 
-function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp) {
+function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp, lang='th') {
+  const isEn = lang === 'en';
   const MTH2 = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const period = `${MTH2[parseInt(month)-1]} ${year}`;
+  const MTH2TH = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+  const period = isEn
+    ? `${MTH2[parseInt(month)-1]} ${year}`
+    : `${MTH2TH[parseInt(month)-1]} ${year}`;
   const net = parseFloat(entry.net)||0;
   const bG = parseFloat(entry.bG)||(parseFloat(entry.snap&&entry.snap.base)||0);
   const gross = parseFloat(entry.gross)||0;
@@ -657,57 +666,92 @@ function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp) {
   const otH = parseFloat(entry.otHrs)||0;
   const dL = parseFloat(entry.dL)||0;
   const isPerm = (entry.snap&&entry.snap.ct||staff.ct) === 'permanent';
-  const cth = (company&&company.cth)||'ReadyCheckGo';
-  const sgn = (company&&company.sgn)||'';
-  const today = new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'});
+  const cth = isEn ? (company&&company.cthen)||'Ready Check Go Group Co., Ltd.' : (company&&company.cth)||'ReadyCheckGo';
+  const sgn = isEn ? (company&&company.sgnen)||company.sgn||'' : (company&&company.sgn)||'';
+  const today = isEn
+    ? new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'})
+    : new Date().toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'});
   const logoHtml = buildLogoHeaderHTML(logos);
   const sigHtml = buildSigBlockHTML(sigstamp, sgn, today);
-
+  const L = isEn ? {
+    base:'Base Salary', ot:`OT (${otH} hrs)`, bonus:'Bonus', gross:'Total Income',
+    sso:'Social Security (5%)', tax:'Income Tax', wht:'Withholding Tax 3%',
+    leave:'Leave Deduction', adv:'Advance', other:'Other Deductions', net:'NET PAY',
+    payslip:'PAY SLIP', id:'ID', name:'Name', pos:'Position', contract:'Contract'
+  } : {
+    base:'เงินเดือน', ot:`OT (${otH} hrs)`, bonus:'Bonus', gross:'รายได้รวม',
+    sso:'ประกันสังคม (5%)', tax:'ภาษีเงินได้ ภงด.1', wht:'หัก ณ ที่จ่าย 3%',
+    leave:'หักลา', adv:'หักเงินยืม', other:'หักอื่นๆ', net:'เงินสุทธิ',
+    payslip:'สลิปเงินเดือน', id:'รหัส', name:'ชื่อ', pos:'ตำแหน่ง', contract:'ประเภท'
+  };
   let rows = '';
-  rows += `<tr><td>Base Salary</td><td style="text-align:right">${fmtN(bG)} ฿</td></tr>`;
-  if(otA>0) rows += `<tr><td>OT (${otH} hrs)</td><td style="text-align:right">${fmtN(otA)} ฿</td></tr>`;
-  if(bon>0) rows += `<tr><td>Bonus</td><td style="text-align:right">${fmtN(bon)} ฿</td></tr>`;
-  rows += `<tr style="font-weight:700;border-top:1.5px solid #374151"><td>Total Income</td><td style="text-align:right">${fmtN(gross)} ฿</td></tr>`;
+  rows += `<tr><td>${L.base}</td><td style="text-align:right">${fmtN(bG)} ฿</td></tr>`;
+  if(otA>0) rows += `<tr><td>${L.ot}</td><td style="text-align:right">${fmtN(otA)} ฿</td></tr>`;
+  if(bon>0) rows += `<tr><td>${L.bonus}</td><td style="text-align:right">${fmtN(bon)} ฿</td></tr>`;
+  rows += `<tr style="font-weight:700;border-top:1.5px solid #374151"><td>${L.gross}</td><td style="text-align:right">${fmtN(gross)} ฿</td></tr>`;
   if(isPerm) {
-    if(sso>0) rows += `<tr style="color:#6b7280"><td>SSO (5%)</td><td style="text-align:right">−${fmtN(sso)} ฿</td></tr>`;
-    if(mT>0) rows += `<tr style="color:#6b7280"><td>Income Tax ภงด.1</td><td style="text-align:right">−${fmtN(mT)} ฿</td></tr>`;
+    if(sso>0) rows += `<tr style="color:#6b7280"><td>${L.sso}</td><td style="text-align:right">−${fmtN(sso)} ฿</td></tr>`;
+    if(mT>0) rows += `<tr style="color:#6b7280"><td>${L.tax}</td><td style="text-align:right">−${fmtN(mT)} ฿</td></tr>`;
   } else {
-    if(whtD>0) rows += `<tr style="color:#6b7280"><td>WHT 3%</td><td style="text-align:right">−${fmtN(whtD)} ฿</td></tr>`;
+    if(whtD>0) rows += `<tr style="color:#6b7280"><td>${L.wht}</td><td style="text-align:right">−${fmtN(whtD)} ฿</td></tr>`;
   }
-  if(dL>0) rows += `<tr style="color:#6b7280"><td>Leave Deduction</td><td style="text-align:right">−${fmtN(dL)} ฿</td></tr>`;
-  if(adv>0) rows += `<tr style="color:#6b7280"><td>Advance</td><td style="text-align:right">−${fmtN(adv)} ฿</td></tr>`;
-  if(dO>0) rows += `<tr style="color:#6b7280"><td>Other Deductions</td><td style="text-align:right">−${fmtN(dO)} ฿</td></tr>`;
+  if(dL>0) rows += `<tr style="color:#6b7280"><td>${L.leave}</td><td style="text-align:right">−${fmtN(dL)} ฿</td></tr>`;
+  if(adv>0) rows += `<tr style="color:#6b7280"><td>${L.adv}</td><td style="text-align:right">−${fmtN(adv)} ฿</td></tr>`;
+  if(dO>0) rows += `<tr style="color:#6b7280"><td>${L.other}</td><td style="text-align:right">−${fmtN(dO)} ฿</td></tr>`;
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <style>body{font-family:'Sarabun',sans-serif;font-size:13px;color:#1a1a2e;padding:0;margin:0}
     .wrap{max-width:540px;margin:auto;padding:28px}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    td{padding:5px 0}
+    table{width:100%;border-collapse:collapse;font-size:13px}td{padding:5px 0}
     .hdr{border-bottom:2px solid #1e3a5f;padding-bottom:10px;margin-bottom:14px}
     .net{background:#1e3a5f;color:#fff;border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-top:12px}
     </style></head><body><div class="wrap">
     ${logoHtml}
     <div class="hdr"><div style="font-size:14px;font-weight:700;color:#1e3a5f">${cth}</div>
-    <div style="font-size:12px;color:#6b7280">Pay Slip — ${period}</div></div>
-    <table style="margin-bottom:12px;font-size:12px"><tr><td><b>ID:</b> ${staff.id}</td><td><b>Name:</b> ${staff.fn} ${staff.ln}</td></tr>
-    <tr><td><b>Position:</b> ${staff.pos}</td><td><b>Contract:</b> ${isPerm?'Permanent (ภงด.1)':staff.ct}</td></tr></table>
+    <div style="font-size:12px;color:#6b7280">${L.payslip} — ${period}</div></div>
+    <table style="margin-bottom:12px;font-size:12px">
+      <tr><td><b>${L.id}:</b> ${staff.id}</td><td><b>${L.name}:</b> ${staff.fn} ${staff.ln}</td></tr>
+      <tr><td><b>${L.pos}:</b> ${staff.pos}</td><td><b>${L.contract}:</b> ${isPerm?'Permanent':staff.ct}</td></tr>
+    </table>
     <table>${rows}</table>
-    <div class="net"><b style="font-size:14px">NET PAY</b><b style="font-size:22px;color:#fde68a">${fmtN(net)} ฿</b></div>
+    <div class="net"><b style="font-size:14px">${L.net}</b><b style="font-size:22px;color:#fde68a">${fmtN(net)} ฿</b></div>
     ${sigHtml}
     </div></body></html>`;
 }
 
-function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp) {
-  const cth = (company&&company.cth)||'ReadyCheckGo';
+function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp, lang='th') {
+  const isEn = lang === 'en';
+  const cth = isEn ? (company&&company.cthen)||'Ready Check Go Group Co., Ltd.' : (company&&company.cth)||'ReadyCheckGo';
   const addr = (company&&company.addr)||'';
-  const sgn = (company&&company.sgn)||'';
-  const cn = branch.certname||branch.name||'';
-  const sd = staff.sd ? new Date(staff.sd).toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'}) : '';
+  const sgn = isEn ? (company&&company.sgnen)||company.sgn||'' : (company&&company.sgn)||'';
+  const cn = isEn ? (branch.nameEn||branch.certname||branch.name||'') : (branch.certname||branch.name||'');
+  const sd = staff.sd ? new Date(staff.sd).toLocaleDateString(isEn?'en-GB':'th-TH',{year:'numeric',month:'long',day:'numeric'}) : '';
   const yrs = staff.sd ? Math.floor((Date.now()-new Date(staff.sd))/(365.25*24*60*60*1000)) : 0;
   const mos = staff.sd ? Math.floor(((Date.now()-new Date(staff.sd))%(365.25*24*60*60*1000))/(30.44*24*60*60*1000)) : 0;
   const logoHtml = buildLogoHeaderHTML(logos);
   const sigHtml = buildSigBlockHTML(sigstamp, sgn, dateStr);
+
+  const content = isEn ? `
+    <p>This is to certify that <b>${staff.fn} ${staff.ln}</b> is an employee of ${cth}.</p>
+    <p>Position: <b>${staff.pos} · ${staff.dept}</b></p>
+    ${cn?`<p>At ${cn}</p>`:''}
+    ${showSalary&&staff.base?`<p>Monthly Salary: <b>${fmtN(staff.base)} THB</b></p>`:''}
+    <p>Start Date: ${sd}</p>
+    <p>Length of Service: ${yrs} year${yrs!==1?'s':''} ${mos} month${mos!==1?'s':''}</p>
+    <p>This certificate is issued for the purpose requested by the employee.</p>
+  ` : `
+    <p>หนังสือฉบับนี้ออกให้เพื่อรับรองว่า <b>${staff.fn} ${staff.ln}</b> เป็นพนักงานของ${cth}</p>
+    <p>ตำแหน่ง <b>${staff.pos} · ${staff.dept}</b></p>
+    ${cn?`<p>ที่${cn}</p>`:''}
+    ${showSalary&&staff.base?`<p>มีอัตราเงินเดือนล่าสุด <b>${fmtN(staff.base)} บาทต่อเดือน</b></p>`:''}
+    <p>เริ่มงาน ${sd} จนถึงปัจจุบัน</p>
+    <p>อายุงาน: ${yrs} ปี ${mos} เดือน</p>
+    <p>จึงเรียนมาเพื่อทราบ</p>
+  `;
+
+  const title = isEn ? 'EMPLOYEE CERTIFICATE' : 'หนังสือรับรองพนักงาน';
+  const issuedLabel = isEn ? `Issued on ${dateStr}` : `ออกให้ ณ วันที่ ${dateStr}`;
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
@@ -716,18 +760,12 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
     </style></head><body><div class="wrap">
     ${logoHtml}
     <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px;border-bottom:2px solid #1e3a5f;padding-bottom:10px">
-      <div><div style="font-weight:700">${cn}</div>${branch.lic?`<div>เลขที่ใบอนุญาต ${branch.lic}</div>`:''}</div>
-      <div style="text-align:right"><div style="font-weight:700">${cth}</div><div style="color:#6b7280;white-space:pre-line">${addr}</div></div>
+      <div><div style="font-weight:700">${cn}</div>${branch.lic?`<div>${isEn?'License No.':'เลขที่ใบอนุญาต'} ${branch.lic}</div>`:''}</div>
+      <div style="text-align:right"><div style="font-weight:700">${cth}</div><div style="color:#6b7280;white-space:pre-line;font-size:11px">${addr}</div></div>
     </div>
-    <div style="text-align:center;margin-bottom:16px"><div style="font-size:16px;font-weight:700;text-decoration:underline;color:#1e3a5f">หนังสือรับรองพนักงาน</div></div>
-    <div style="text-align:right;font-size:12px;color:#6b7280;margin-bottom:16px">ออกให้ ณ วันที่ ${dateStr}</div>
-    <p>หนังสือฉบับนี้ออกให้เพื่อรับรองว่า <b>${staff.fn} ${staff.ln}</b> เป็นพนักงานของ${cth}</p>
-    <p>ตำแหน่ง <b>${staff.pos} · ${staff.dept}</b></p>
-    ${cn?`<p>ที่${cn}</p>`:''}
-    ${showSalary&&staff.base?`<p>มีอัตราเงินเดือนล่าสุด <b>${fmtN(staff.base)} บาทต่อเดือน</b></p>`:''}
-    <p>เริ่มงาน ${sd} จนถึงปัจจุบัน</p>
-    <p>อายุงาน: ${yrs} ปี ${mos} เดือน</p>
-    <p>จึงเรียนมาเพื่อทราบ</p>
+    <div style="text-align:center;margin-bottom:16px"><div style="font-size:16px;font-weight:700;text-decoration:underline;color:#1e3a5f">${title}</div></div>
+    <div style="text-align:right;font-size:12px;color:#6b7280;margin-bottom:16px">${issuedLabel}</div>
+    ${content}
     ${sigHtml}
     </div></body></html>`;
 }
