@@ -346,7 +346,7 @@ app.get('/api/branches', async (req, res) => {
 
 app.post('/api/document-request', async (req, res) => {
   try {
-    const { staffId, lineUserId, docType, branchId, showSalary, month, year, note, lang } = req.body;
+    const { staffId, lineUserId, docType, branchId, showSalary, month, year, note, lang, showReason } = req.body;
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff || staff.lineUserId !== lineUserId) return res.json({ ok: false, msg: 'Unauthorized' });
@@ -360,6 +360,7 @@ app.post('/api/document-request', async (req, res) => {
       month: month || null,
       year: year || null,
       note: note || '',
+      showReason: showReason !== false,
       status: 'pending',
       source: 'line',
       createdAt: new Date().toISOString()
@@ -404,8 +405,7 @@ app.post('/api/approve-document', async (req, res) => {
       const dateStr = isEn
         ? new Date().toLocaleDateString('en-GB',{year:'numeric',month:'long',day:'numeric'})
         : new Date().toLocaleDateString('th-TH',{year:'numeric',month:'long',day:'numeric'});
-      html = buildCertHTML(staff, branch, company, doc.showSalary, dateStr, logos, sigstamp, doc.lang||'th');
-    }
+html = buildCertHTML(staff, branch, company, doc.showSalary, dateStr, logos, sigstamp, doc.lang||'th', doc.note||'', doc.showReason!==false);    }
 
     // Generate PDF with puppeteer
     const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
@@ -720,8 +720,7 @@ function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp, l
     </div></body></html>`;
 }
 
-function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp, lang='th') {
-  const isEn = lang === 'en';
+function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigstamp, lang='th', purpose='', showReason=true) {  const isEn = lang === 'en';
   const cth = isEn ? (company&&company.cthen)||'Ready Check Go Group Co., Ltd.' : (company&&company.cth)||'ReadyCheckGo';
   const addr = isEn ? (company&&company.addren)||company.addr||'' : (company&&company.addr)||'';  
   const sgn = isEn ? (company&&company.sgnen)||company.sgn||'' : (company&&company.sgn)||'';
@@ -739,7 +738,7 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
     ${showSalary&&staff.base?`<p>Monthly Salary: <b>${fmtN(staff.base)} THB</b></p>`:''}
     <p>Start Date: ${sd}</p>
     <p>Length of Service: ${yrs} year${yrs!==1?'s':''} ${mos} month${mos!==1?'s':''}</p>
-    <p>This certificate is issued for the purpose requested by the employee.</p>
+    ${showReason && purpose ? `<p>This certificate is issued for the purpose of <b>${purpose}</b>.</p>` : '<p>This certificate is issued for the purpose requested by the employee.</p>'}
   ` : `
     <p>หนังสือฉบับนี้ออกให้เพื่อรับรองว่า <b>${staff.fn} ${staff.ln}</b> เป็นพนักงานของ${cth}</p>
     <p>ตำแหน่ง <b>${staff.pos} · ${staff.dept}</b></p>
@@ -747,7 +746,7 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
     ${showSalary&&staff.base?`<p>มีอัตราเงินเดือนล่าสุด <b>${fmtN(staff.base)} บาทต่อเดือน</b></p>`:''}
     <p>เริ่มงาน ${sd} จนถึงปัจจุบัน</p>
     <p>อายุงาน: ${yrs} ปี ${mos} เดือน</p>
-    <p>จึงเรียนมาเพื่อทราบ</p>
+   ${showReason && purpose ? `<p>จึงออกหนังสือรับรองฉบับนี้เพื่อ <b>${purpose}</b></p>` : '<p>จึงเรียนมาเพื่อทราบ</p>'}
   `;
 
   const title = isEn ? 'EMPLOYEE CERTIFICATE' : 'หนังสือรับรองพนักงาน';
