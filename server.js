@@ -5,6 +5,9 @@ const line = require('@line/bot-sdk');
 const admin = require('firebase-admin');
 const path = require('path');
 const puppeteer = require('puppeteer');
+const multer = require('multer');
+const cron = require('node-cron');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // ── FIREBASE INIT ──────────────────────────────────────
 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
@@ -207,17 +210,30 @@ app.get('/api/leave-balance/:staffId/:year', async (req, res) => {
 
 app.post('/api/leave-request', async (req, res) => {
   try {
-    const { staffId, lineUserId, type, customName, from, to, days, reason } = req.body;
+    const { staffId, lineUserId, type, customName, from, to, days, reason, medCertUrl } = req.body;
     if (!staffId || !type || !from || !days) return res.json({ ok: false, msg: 'Missing required fields' });
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff || staff.lineUserId !== lineUserId) return res.json({ ok: false, msg: 'Unauthorized' });
-    const newLeave = { id: 'LV' + Date.now(), staffId, type, customName: customName || null, from, to: to || from, days: parseFloat(days), year: parseInt(from.split('-')[0]), reason: reason || '', status: 'pending', source: 'line', createdAt: new Date().toISOString() };
+    const newLeave = { id: 'LV' + Date.now(), staffId, type, customName: customName || null, from, to: to || from, days: parseFloat(days), year: parseInt(from.split('-')[0]), reason: reason || '', medCertUrl: medCertUrl || null, status: 'pending', source: 'line', createdAt: new Date().toISOString() };
     const leaves = await getLeaves();
     leaves.push(newLeave);
     await saveLeaves(leaves);
     await notifyAdmin(staff, newLeave);
     res.json({ ok: true, leaveId: newLeave.id });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+app.post('/api/upload-med-cert', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.json({ ok: false, msg: 'No file uploaded' });
+    const ext = req.file.originalname.split('.').pop() || 'jpg';
+    const fileName = `medcerts/MC_${Date.now()}.${ext}`;
+    const file = bucket.file(fileName);
+    await file.save(req.file.buffer, { metadata: { contentType: req.file.mimetype } });
+    await file.makePublic();
+    const url = `https://storage.googleapis.com/rcg-payroll.firebasestorage.app/${fileName}`;
+    res.json({ ok: true, url });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
@@ -478,6 +494,19 @@ app.post('/api/reject-document', async (req, res) => {
     if (staff && staff.lineUserId) {
       await lineClient.pushMessage({ to: staff.lineUserId, messages: [{ type: 'text', text: `❌ คำขอเอกสารของคุณไม่ได้รับการอนุมัติ\nกรุณาติดต่อ HR หากมีข้อสงสัย` }] });
     }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+app.post('/api/delete-document', async (req, res) => {
+  try {
+    const { docId } = req.body;
+    const docs = await getDocRequests();
+    const idx = docs.findIndex(d => d.id === docId);
+    if (idx < 0) return res.json({ ok: false, msg: 'Not found' });
+    if (docs[idx].status === 'pending') return res.json({ ok: false, msg: 'Cannot delete pending request' });
+    docs.splice(idx, 1);
+    await saveDocRequests(docs);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
@@ -768,6 +797,31 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
     ${sigHtml}
     </div></body></html>`;
 }
+
+// ── CRON JOBS ──────────────────────────────────────────
+// Every Sunday 23:00 Bangkok time — delete completed doc requests older than 7 days
+cron.schedule('0 23 * * 0', async () => {
+  try {
+    const docs = await getDocRequests();
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const remaining = docs.filter(d => {
+      if (d.status === 'pending') return true;
+      const created = d.createdAt ? new Date(d.createdAt).getTime() : 0;
+      return created > cutoff;
+    });
+    await saveDocRequests(remaining);
+    console.log(`🗑️ Cron: cleaned ${docs.length - remaining.length} completed doc requests`);
+  } catch (e) { console.error('Cron doc cleanup error:', e); }
+}, { timezone: 'Asia/Bangkok' });
+
+// Every 1st April 00:00 Bangkok time — delete all medcert files from Storage
+cron.schedule('0 0 1 4 *', async () => {
+  try {
+    const [files] = await bucket.getFiles({ prefix: 'medcerts/' });
+    await Promise.all(files.map(f => f.delete()));
+    console.log(`🗑️ Cron: deleted ${files.length} med cert files from Storage`);
+  } catch (e) { console.error('Cron medcert cleanup error:', e); }
+}, { timezone: 'Asia/Bangkok' });
 
 // ── START ──────────────────────────────────────────────
 app.listen(PORT, () => {
