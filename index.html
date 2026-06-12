@@ -634,6 +634,7 @@ async function submitDocRequest() {
   const docType = document.getElementById('doc-type').value;
   const branchId = document.getElementById('doc-branch').value;
   const note = document.getElementById('doc-note').value.trim();
+  const showReason = document.querySelector('input[name="doc-show-reason"]:checked')?.value !== 'no';
   const showSalary = document.getElementById('doc-show-salary').value !== 'no';
   const month = document.getElementById('doc-month').value;
   const year = document.getElementById('doc-year').value;
@@ -649,7 +650,7 @@ async function submitDocRequest() {
       body: JSON.stringify({
         staffId: currentStaff.id,
         lineUserId: lineProfile.userId,
-        docType, branchId, showSalary, lang,
+        docType, branchId, showSalary, lang, showReason,
         month: docType === 'payslip' ? month : null,
         year: docType === 'payslip' ? year : null,
         note
