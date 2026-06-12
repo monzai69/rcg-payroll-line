@@ -191,7 +191,12 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
         <textarea id="leave-reason" rows="3" placeholder="เช่น กลับบ้านต่างจังหวัด"></textarea>
       </div>
       <div id="leave-sick-note" style="display:none" class="alert alert-yellow">
-        ⚠️ การลาป่วย 2 วันขึ้นไปติดต่อกัน ต้องแนบใบรับรองแพทย์<br>กรุณาส่งรูปใบรับรองแพทย์ให้ HR ทาง LINE
+        ⚠️ การลาป่วย 2 วันขึ้นไปติดต่อกัน ต้องแนบใบรับรองแพทย์<br>
+        <div style="margin-top:8px">
+          <label style="font-size:13px;font-weight:600;color:#92400e">📎 แนบใบรับรองแพทย์ (ถ้ามี)</label>
+          <input type="file" id="med-cert-file" accept="image/*" style="display:block;margin-top:6px;font-size:13px;width:100%">
+          <div id="med-cert-preview" style="display:none;margin-top:6px"><img id="med-cert-img" style="max-height:80px;border-radius:6px;border:1px solid #e5e7eb"></div>
+        </div>
       </div>
       <div id="leave-lwop-note" style="display:none" class="alert alert-red">
         ⚠️ LWOP — ลาไม่รับค่าจ้าง<br>วันที่ลาจะถูกหักออกจากเงินเดือนเต็มจำนวน
@@ -410,8 +415,31 @@ function calcLeaveDays() {
 function checkSickNote() {
   const type = document.getElementById('leave-type').value;
   const days = parseFloat(document.getElementById('leave-days').value) || 0;
-  document.getElementById('leave-sick-note').style.display = (type === 'sick' && days >= 2) ? 'block' : 'none';
+  const show = type === 'sick' && days >= 2;
+  document.getElementById('leave-sick-note').style.display = show ? 'block' : 'none';
+  if (!show) {
+    const fi = document.getElementById('med-cert-file');
+    if (fi) fi.value = '';
+    const prev = document.getElementById('med-cert-preview');
+    if (prev) prev.style.display = 'none';
+  }
 }
+
+// Med cert file preview
+document.addEventListener('DOMContentLoaded', () => {
+  const fi = document.getElementById('med-cert-file');
+  if (fi) {
+    fi.addEventListener('change', () => {
+      const file = fi.files[0];
+      const prev = document.getElementById('med-cert-preview');
+      const img = document.getElementById('med-cert-img');
+      if (file && prev && img) {
+        img.src = URL.createObjectURL(file);
+        prev.style.display = 'block';
+      }
+    });
+  }
+});
 
 async function submitLeave() {
   const type = document.getElementById('leave-type').value;
@@ -426,13 +454,25 @@ async function submitLeave() {
   const btn = document.getElementById('btn-submit-leave');
   btn.disabled = true; btn.textContent = '⏳ กำลังส่ง...';
   try {
+    // Upload med cert if provided
+    let medCertUrl = null;
+    const certFile = document.getElementById('med-cert-file');
+    if (certFile && certFile.files[0]) {
+      btn.textContent = '⏳ กำลังอัปโหลดใบรับรองแพทย์...';
+      const formData = new FormData();
+      formData.append('file', certFile.files[0]);
+      const upRes = await fetch(`${API}/api/upload-med-cert`, { method: 'POST', body: formData });
+      const upData = await upRes.json();
+      if (upData.ok) medCertUrl = upData.url;
+      btn.textContent = '⏳ กำลังส่ง...';
+    }
     const res = await fetch(`${API}/api/leave-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         staffId: currentStaff.id,
         lineUserId: lineProfile.userId,
-        type, customName, from, to, days, reason
+        type, customName, from, to, days, reason, medCertUrl
       })
     });
     const data = await res.json();
@@ -443,6 +483,9 @@ async function submitLeave() {
       document.getElementById('leave-to').value = '';
       document.getElementById('leave-days').value = '';
       document.getElementById('leave-reason').value = '';
+      if (certFile) certFile.value = '';
+      const prev = document.getElementById('med-cert-preview');
+      if (prev) prev.style.display = 'none';
     } else {
       showMsg(msg, '❌ ' + data.msg, 'red');
     }
