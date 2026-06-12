@@ -280,7 +280,19 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:#1e3a5f}
           </label>
         </div>
       </div>
-        <textarea id="doc-note" rows="2" placeholder="เช่น ต้องการยื่นธนาคาร"></textarea>
+       <textarea id="doc-note" rows="2" placeholder="e.g. visa application / ยื่นวีซ่า"></textarea>
+<div style="font-size:11px;color:#9ca3af;margin-top:4px">หากขอเอกสารเป็นภาษาอังกฤษ กรุณาระบุเหตุผลเป็นภาษาอังกฤษ</div>
+</div>
+<div class="fr">
+  <label>แสดงเหตุผลในเอกสาร / Show reason on document</label>
+  <div style="display:flex;gap:8px">
+    <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">
+      <input type="radio" name="doc-show-reason" value="yes" checked style="accent-color:var(--nv)"> ✅ แสดง
+    </label>
+    <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;border:1.5px solid #e5e7eb;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600">
+      <input type="radio" name="doc-show-reason" value="no" style="accent-color:var(--nv)"> ❌ ไม่แสดง
+    </label>
+  </div>
       </div>
       <div id="doc-msg" style="display:none" class="alert"></div>
     </div>
