@@ -258,7 +258,9 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
         staffName: `${staff.nn} ${staff.fn}`,
         pos: staff.pos || '',
         net,
-        rows: entry.payRows
+        rows: entry.payRows,
+        confirmed: !!entry.confirmed,
+        confirmedAt: entry.confirmedAt || null
       });
     }
 
@@ -289,7 +291,7 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     if (adv > 0) rows.push({ label: 'Advance', amt: -adv, type: 'ded' });
     if (dO > 0) rows.push({ label: 'Other Deductions', amt: -dO, type: 'ded' });
     rows.push({ label: 'NET PAY', amt: net, type: 'net' });
-    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, staffName: `${staff.nn} ${staff.fn}`, pos: staff.pos || '', net, rows });
+    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, staffName: `${staff.nn} ${staff.fn}`, pos: staff.pos || '', net, rows, confirmed: !!entry.confirmed, confirmedAt: entry.confirmedAt || null });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
@@ -557,6 +559,34 @@ app.post('/api/set-admin-line-id', async (req, res) => {
 });
 
 // Publish salary — notify all staff with LINE ID
+app.post('/api/confirm-salary', async (req, res) => {
+  try {
+    const { staffId, lineUserId, month, year } = req.body;
+    const allStaff = await getAllStaff();
+    const staff = allStaff.find(s => s.id === staffId);
+    if (!staff || staff.lineUserId !== lineUserId) return res.json({ ok: false, msg: 'Unauthorized' });
+    const payroll = await getPayroll();
+    const key = mkKey(month, year);
+    if (!payroll[key] || !payroll[key][staffId]) return res.json({ ok: false, msg: 'No salary data found' });
+    // Save confirmation
+    payroll[key][staffId].confirmed = true;
+    payroll[key][staffId].confirmedAt = new Date().toISOString();
+    await savePayroll(payroll);
+    // Notify admin via LINE
+    const period = `${MTH[parseInt(month)-1]} ${year}`;
+    try {
+      await lineClient.pushMessage({
+        to: ADMIN_LINE_ID,
+        messages: [{
+          type: 'text',
+          text: `✅ ${staff.nn} ${staff.fn} ยืนยันเงินเดือน ${period} แล้ว`
+        }]
+      });
+    } catch(e) { console.error('Admin notify error:', e.message); }
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
 app.post('/api/publish-salary', async (req, res) => {
   try {
     const { month, year } = req.body;
