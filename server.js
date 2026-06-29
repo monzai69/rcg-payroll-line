@@ -248,55 +248,36 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff) return res.json({ ok: false, msg: 'Staff not found' });
 
-    // Build full breakdown from saved snapshot + entry
-    const snap = entry.snap || {};
-    const ct = snap.ct || staff.ct || 'permanent';
-    const isPerm = ct === 'permanent';
-    const emptype = snap.emptype || staff.emptype || 'fulltime';
-    const items = snap.items || staff.items || [];
-    const fptmethod = snap.fptmethod || staff.fptmethod || 'hourly';
+    const net = parseFloat(entry.net) || 0;
 
-    // Base
-    let bG = 0, bLabel = 'Base Salary';
-    if (emptype === 'fulltime') { bG = parseFloat(snap.base || staff.base) || 0; }
-    else if (emptype === 'fullparttime') {
-      if (fptmethod === 'daily') { const d = parseFloat(entry.days)||0, r = parseFloat(snap.fptdayrate||staff.fptdayrate)||0; bG=d*r; bLabel=`${d}d × ${fmt(r)}฿`; }
-      else { const h = parseFloat(entry.hours)||0, r = parseFloat(snap.hrrate||staff.hrrate)||0; bG=h*r; bLabel=`${h}hrs × ${fmt(r)}฿`; }
+    // If full breakdown rows were saved, use them directly
+    if (entry.payRows && entry.payRows.length) {
+      return res.json({
+        ok: true,
+        period: `${MTH[parseInt(month)-1]} ${year}`,
+        staffName: `${staff.nn} ${staff.fn}`,
+        pos: staff.pos || '',
+        net,
+        rows: entry.payRows
+      });
     }
 
-    // Leave deduction
-    const dL = parseFloat(entry.dL) || 0;
-    const leaveDays = parseFloat(entry.leaveDays) || 0;
-    const leaveHrs = parseFloat(entry.leaveHrs) || 0;
-
-    // Items
-    const rev = parseFloat(entry.rev) || 0;
-    const itemRows = [];
-    (items).forEach(item => {
-      if (!item || !item.name) return;
-      // Simple: use saved net from items if available, otherwise skip
-    });
-
-    // Key figures from saved entry
-    const gross = parseFloat(entry.gross) || (parseFloat(entry.net)||0);
-    const net = parseFloat(entry.net) || 0;
+    // Fallback for old entries without payRows — basic summary
+    const snap = entry.snap || {};
+    const ct = snap.ct || staff.ct || 'permanent';
+    const isPerm = ct === 'permanent' || ct === 'permanent_wht';
+    const gross = parseFloat(entry.gross) || net;
     const sso = parseFloat(entry.sso) || 0;
     const mT = parseFloat(entry.mT) || 0;
     const whtD = parseFloat(entry.whtD) || 0;
     const adv = parseFloat(entry.adv) || 0;
     const dO = parseFloat(entry.dOth) || 0;
+    const bG = parseFloat(snap.base || staff.base) || 0;
+    const rev = parseFloat(entry.rev) || 0;
     const bon = parseFloat(entry.bonus) || 0;
-    const otA = parseFloat(entry.otA) || (parseFloat(entry.otHrs)||0) * (parseFloat(snap.otrate||staff.otrate)||0);
-    const otH = parseFloat(entry.otHrs) || 0;
-
-    // Build rows for LIFF display
     const rows = [];
-    rows.push({ label: bLabel, amt: bG, type: 'income' });
-    if (dL > 0) rows.push({ label: `Leave (${leaveDays}d ${leaveHrs}hrs)`, amt: -dL, type: 'ded' });
-    if (rev > 0 && items.some(i => ['comm_flat','comm_tiered','comm_tiered_fixed'].includes(i.type))) {
-      rows.push({ label: `Revenue`, amt: rev, type: 'info' });
-    }
-    if (otA > 0) rows.push({ label: `OT (${otH}hrs)`, amt: otA, type: 'income' });
+    rows.push({ label: 'Base Salary', amt: bG, type: 'income' });
+    if (rev > 0) rows.push({ label: 'Revenue', amt: rev, type: 'income' });
     if (bon > 0) rows.push({ label: 'Bonus', amt: bon, type: 'income' });
     rows.push({ label: 'Gross Income', amt: gross, type: 'sub' });
     if (isPerm) {
@@ -307,14 +288,8 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     }
     if (adv > 0) rows.push({ label: 'Advance', amt: -adv, type: 'ded' });
     if (dO > 0) rows.push({ label: 'Other Deductions', amt: -dO, type: 'ded' });
-
-    res.json({
-      ok: true,
-      period: `${MTH[parseInt(month)-1]} ${year}`,
-      staffName: `${staff.nn} ${staff.fn}`,
-      pos: staff.pos || '',
-      net, rows
-    });
+    rows.push({ label: 'NET PAY', amt: net, type: 'net' });
+    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, staffName: `${staff.nn} ${staff.fn}`, pos: staff.pos || '', net, rows });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
