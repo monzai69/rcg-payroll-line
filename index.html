@@ -544,6 +544,27 @@ async function loadSalary() {
     const subRows = data.rows.filter(r => r.type === 'sub');
     const dedRows = data.rows.filter(r => r.type === 'ded');
     const sectionHdr = label => `<div style="padding:6px 14px;background:#f8fafc;font-size:10px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.8px">${label}</div>`;
+
+    // Check if this is current month
+    const now = new Date();
+    const isCurrentMonth = parseInt(month) === (now.getMonth() + 1) && parseInt(year) === now.getFullYear();
+
+    // Confirm section
+    let confirmSection = '';
+    if (isCurrentMonth) {
+      if (data.confirmed) {
+        confirmSection = `<div style="padding:14px 16px;background:#f0fdf4;border-top:1px solid #bbf7d0;text-align:center">
+          <div style="font-size:14px;font-weight:700;color:#16a34a">✅ คุณยืนยันเงินเดือนเดือนนี้แล้ว</div>
+          <div style="font-size:11px;color:#9ca3af;margin-top:4px">Confirmed · ${data.confirmedAt ? new Date(data.confirmedAt).toLocaleDateString('th-TH') : ''}</div>
+        </div>`;
+      } else {
+        confirmSection = `<div style="padding:14px 16px;background:#fffbeb;border-top:1px solid #fde68a">
+          <div style="font-size:12px;color:#92400e;margin-bottom:10px;line-height:1.5">⚠️ หากยังต้องการแก้ไข ติดต่อ HR ก่อนกด CONFIRM<br>หากกดแล้วจะไม่สามารถแก้ไขยอดได้</div>
+          <button id="btn-confirm-salary" onclick="confirmSalary('${month}','${year}')" style="width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:12px;font-size:15px;font-weight:700;cursor:pointer">✅ CONFIRM เงินเดือน</button>
+        </div>`;
+      }
+    }
+
     result.innerHTML = `
       <div style="background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)">
         <div style="background:#1e3a5f;padding:18px 16px 14px">
@@ -559,10 +580,36 @@ async function loadSalary() {
           <span style="font-size:15px;font-weight:700;color:#fff">NET PAY</span>
           <span style="font-size:28px;font-weight:900;color:#fde68a">${fmt(data.net)} ฿</span>
         </div>
+        ${confirmSection}
         <div style="padding:10px 14px;font-size:11px;color:#9ca3af;text-align:center;background:#f8fafc">หากมีข้อสงสัย กรุณาติดต่อ HR</div>
       </div>`;
   } catch (err) {
     result.innerHTML = '<div class="alert alert-red">❌ เกิดข้อผิดพลาด กรุณาลองใหม่</div>';
+  }
+}
+
+async function confirmSalary(month, year) {
+  const btn = document.getElementById('btn-confirm-salary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังยืนยัน...'; }
+  try {
+    const res = await fetch(`${API}/api/confirm-salary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffId: currentStaff.id, lineUserId: lineProfile.userId, month, year })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      // Reload salary to show confirmed state
+      document.getElementById('sal-month').value = month;
+      document.getElementById('sal-year').value = year;
+      loadSalary();
+    } else {
+      alert('❌ ' + data.msg);
+      if (btn) { btn.disabled = false; btn.textContent = '✅ CONFIRM เงินเดือน'; }
+    }
+  } catch (e) {
+    alert('❌ เกิดข้อผิดพลาด กรุณาลองใหม่');
+    if (btn) { btn.disabled = false; btn.textContent = '✅ CONFIRM เงินเดือน'; }
   }
 }
 
