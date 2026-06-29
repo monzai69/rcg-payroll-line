@@ -72,6 +72,9 @@ async function getPayroll() {
   if (!snap.exists) return {};
   return JSON.parse(snap.data().data || '{}');
 }
+async function savePayroll(payroll) {
+  await db.collection('config').doc('payroll').set({ data: JSON.stringify(payroll), updatedAt: Date.now() });
+}
 async function getBranches() {
   const snap = await db.collection('config').doc('branches').get();
   if (!snap.exists) return [];
