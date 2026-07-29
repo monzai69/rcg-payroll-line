@@ -247,6 +247,8 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     const key = mkKey(month, year);
     const entry = payroll[key] && payroll[key][staffId];
     if (!entry) return res.json({ ok: false, msg: 'Salary not published yet for this period' });
+    const meta = payroll[key]._meta;
+    if (!meta || !meta.published) return res.json({ ok: false, msg: 'ยังไม่เปิดให้ตรวจสอบเงินเดือน / Salary not published yet' });
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff) return res.json({ ok: false, msg: 'Staff not found' });
@@ -638,6 +640,22 @@ app.post('/api/publish-salary', async (req, res) => {
         sent++;
       } catch (e) { console.error('Failed to notify', s.id, e.message); }
     }
+
+    // Mark this period as published + schedule reminder/auto-confirm checks
+    const payroll = await getPayroll();
+    const key = mkKey(month, year);
+    if (!payroll[key]) payroll[key] = {};
+    const now = Date.now();
+    payroll[key]._meta = {
+      published: true,
+      publishedAt: new Date(now).toISOString(),
+      reminderAt: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
+      reminderSent: false,
+      autoConfirmAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
+      autoConfirmDone: false
+    };
+    await savePayroll(payroll);
+
     res.json({ ok: true, sent, total: staffWithLine.length });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
@@ -807,6 +825,65 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
 }
 
 // ── CRON JOBS ──────────────────────────────────────────
+// Every 10 minutes — check published payroll periods for due 2hr reminders / 5hr auto-confirm
+// Runs repeatedly rather than a one-shot timer, so a server restart just means the next tick still fires on schedule
+cron.schedule('*/10 * * * *', async () => {
+  try {
+    const payroll = await getPayroll();
+    const allStaff = await getAllStaff();
+    const now = Date.now();
+    let changed = false;
+
+    for (const key of Object.keys(payroll)) {
+      const period = payroll[key];
+      const meta = period && period._meta;
+      if (!meta || !meta.published) continue;
+      const staffIds = Object.keys(period).filter(k => k !== '_meta');
+
+      // 2hr reminder — nudge unconfirmed Active staff who have LINE registered
+      if (!meta.reminderSent && meta.reminderAt && now >= new Date(meta.reminderAt).getTime()) {
+        const [y, m] = key.split('_');
+        const periodLabel = `${MTH[parseInt(m) - 1]} ${y}`;
+        for (const sid of staffIds) {
+          const entry = period[sid];
+          if (entry.confirmed) continue;
+          const staff = allStaff.find(s => s.id === sid);
+          if (!staff || staff.st !== 'Active' || !staff.lineUserId) continue;
+          try {
+            await lineClient.pushMessage({
+              to: staff.lineUserId,
+              messages: [{ type: 'text', text: `🔔 แจ้งเตือน: กรุณายืนยันเงินเดือน ${periodLabel} ของคุณในระบบ LIFF` }]
+            });
+          } catch (e) { console.error('Reminder notify error', sid, e.message); }
+        }
+        meta.reminderSent = true;
+        changed = true;
+      }
+
+      // 5hr auto-confirm — mark remaining unconfirmed Active staff as confirmed, stop further reminders
+      if (!meta.autoConfirmDone && meta.autoConfirmAt && now >= new Date(meta.autoConfirmAt).getTime()) {
+        for (const sid of staffIds) {
+          const entry = period[sid];
+          const staff = allStaff.find(s => s.id === sid);
+          if (!staff || staff.st !== 'Active') continue;
+          if (!entry.confirmed) {
+            entry.confirmed = true;
+            entry.autoConfirmed = true;
+            entry.confirmedAt = new Date(now).toISOString();
+          }
+        }
+        meta.autoConfirmDone = true;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      await savePayroll(payroll);
+      console.log('⏰ Cron: salary reminder/auto-confirm check completed');
+    }
+  } catch (e) { console.error('Cron salary reminder error:', e); }
+}, { timezone: 'Asia/Bangkok' });
+
 // Every Sunday 23:00 Bangkok time — delete completed doc requests older than 7 days
 cron.schedule('0 23 * * 0', async () => {
   try {
