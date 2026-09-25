@@ -709,17 +709,6 @@ function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp, l
     ? `${MTH2[parseInt(month)-1]} ${year}`
     : `${MTH2TH[parseInt(month)-1]} ${year}`;
   const net = parseFloat(entry.net)||0;
-  const bG = parseFloat(entry.bG)||(parseFloat(entry.snap&&entry.snap.base)||0);
-  const gross = parseFloat(entry.gross)||0;
-  const sso = parseFloat(entry.sso)||0;
-  const mT = parseFloat(entry.mT)||0;
-  const whtD = parseFloat(entry.whtD)||0;
-  const adv = parseFloat(entry.adv)||0;
-  const dO = parseFloat(entry.dOth)||0;
-  const bon = parseFloat(entry.bonus)||0;
-  const otA = parseFloat(entry.otA)||0;
-  const otH = parseFloat(entry.otHrs)||0;
-  const dL = parseFloat(entry.dL)||0;
   const isPerm = (entry.snap&&entry.snap.ct||staff.ct) === 'permanent';
   const cth = isEn ? (company&&company.cthen)||'Ready Check Go Group Co., Ltd.' : (company&&company.cth)||'ReadyCheckGo';
   const sgn = isEn ? (company&&company.sgnen)||company.sgn||'' : (company&&company.sgn)||'';
@@ -729,30 +718,56 @@ function buildPaySlipHTML(staff, entry, month, year, company, logos, sigstamp, l
   const logoHtml = buildLogoHeaderHTML(logos);
   const sigHtml = buildSigBlockHTML(sigstamp, sgn, today);
   const L = isEn ? {
-    base:'Base Salary', ot:`OT (${otH} hrs)`, bonus:'Bonus', gross:'Total Income',
-    sso:'Social Security (5%)', tax:'Income Tax', wht:'Withholding Tax 3%',
-    leave:'Leave Deduction', adv:'Advance', other:'Other Deductions', net:'NET PAY',
-    payslip:'PAY SLIP', id:'ID', name:'Name', pos:'Position', contract:'Contract'
+    net:'NET PAY', payslip:'PAY SLIP', id:'ID', name:'Name', pos:'Position', contract:'Contract'
   } : {
-    base:'เงินเดือน', ot:`OT (${otH} hrs)`, bonus:'Bonus', gross:'รายได้รวม',
-    sso:'ประกันสังคม (5%)', tax:'ภาษีเงินได้ ภงด.1', wht:'หัก ณ ที่จ่าย 3%',
-    leave:'หักลา', adv:'หักเงินยืม', other:'หักอื่นๆ', net:'เงินสุทธิ',
-    payslip:'สลิปเงินเดือน', id:'รหัส', name:'ชื่อ', pos:'ตำแหน่ง', contract:'ประเภท'
+    net:'เงินสุทธิ', payslip:'สลิปเงินเดือน', id:'รหัส', name:'ชื่อ', pos:'ตำแหน่ง', contract:'ประเภท'
   };
-  let rows = '';
-  rows += `<tr><td>${L.base}</td><td style="text-align:right">${fmtN(bG)} ฿</td></tr>`;
-  if(otA>0) rows += `<tr><td>${L.ot}</td><td style="text-align:right">${fmtN(otA)} ฿</td></tr>`;
-  if(bon>0) rows += `<tr><td>${L.bonus}</td><td style="text-align:right">${fmtN(bon)} ฿</td></tr>`;
-  rows += `<tr style="font-weight:700;border-top:1.5px solid #374151"><td>${L.gross}</td><td style="text-align:right">${fmtN(gross)} ฿</td></tr>`;
-  if(isPerm) {
-    if(sso>0) rows += `<tr style="color:#6b7280"><td>${L.sso}</td><td style="text-align:right">−${fmtN(sso)} ฿</td></tr>`;
-    if(mT>0) rows += `<tr style="color:#6b7280"><td>${L.tax}</td><td style="text-align:right">−${fmtN(mT)} ฿</td></tr>`;
-  } else {
-    if(whtD>0) rows += `<tr style="color:#6b7280"><td>${L.wht}</td><td style="text-align:right">−${fmtN(whtD)} ฿</td></tr>`;
+  // Known static payRows labels → Thai equivalents. Anything else (a staff's own
+  // pay item name, a custom base-salary label, etc.) is left exactly as saved —
+  // those are Mon's own configured text, not something to auto-translate.
+  const staticLabelMap = {
+    'Gross Income':'รายได้รวม','SSO (5%':'ประกันสังคม (5%','Income Tax ภงด.1':'ภาษีเงินได้ ภงด.1',
+    'WHT 3%':'หัก ณ ที่จ่าย 3%','Advance (installment)':'หักเงินยืม (ผ่อนชำระ)','Advance':'หักเงินยืม',
+    'Other Deductions':'หักอื่นๆ','NET PAY':'เงินสุทธิ','Revenue':'รายได้'
+  };
+  function localizeLabel(label){
+    if(isEn)return label;
+    for(const k in staticLabelMap){ if(label===k || label.startsWith(k)) return staticLabelMap[k]+label.slice(k.length); }
+    return label;
   }
-  if(dL>0) rows += `<tr style="color:#6b7280"><td>${L.leave}</td><td style="text-align:right">−${fmtN(dL)} ฿</td></tr>`;
-  if(adv>0) rows += `<tr style="color:#6b7280"><td>${L.adv}</td><td style="text-align:right">−${fmtN(adv)} ฿</td></tr>`;
-  if(dO>0) rows += `<tr style="color:#6b7280"><td>${L.other}</td><td style="text-align:right">−${fmtN(dO)} ฿</td></tr>`;
+  function rowHTML(label,amt,type){
+    const lbl=localizeLabel(label);
+    if(type==='sub')return `<tr style="font-weight:700;border-top:1.5px solid #374151"><td>${lbl}</td><td style="text-align:right">${fmtN(amt)} ฿</td></tr>`;
+    if(type==='ded')return `<tr style="color:#6b7280"><td>${lbl}</td><td style="text-align:right">−${fmtN(Math.abs(amt))} ฿</td></tr>`;
+    return `<tr><td>${lbl}</td><td style="text-align:right">${fmtN(amt)} ฿</td></tr>`;
+  }
+
+  let rows='';
+  if (entry.payRows && entry.payRows.length) {
+    // Full breakdown already cached by the web app at Save All / Save & Copy time —
+    // same source of truth the in-app pay slip and LIFF salary view use, so this
+    // can never drift from what staff actually see and get paid.
+    entry.payRows.forEach(r=>{ if(r.type!=='net') rows+=rowHTML(r.label,r.amt,r.type); });
+  } else {
+    // Fallback for a period saved before payRows caching existed — same fields
+    // and shape as the /api/salary endpoint's own fallback, for consistency.
+    const snap=entry.snap||{};
+    const bG=parseFloat(snap.base||staff.base)||0;
+    const gross=parseFloat(entry.gross)||net;
+    const sso=parseFloat(entry.sso)||0,mT=parseFloat(entry.mT)||0,whtD=parseFloat(entry.whtD)||0;
+    const adv=parseFloat(entry.adv)||0,dO=parseFloat(entry.dOth)||0;
+    const rev=parseFloat(entry.rev)||0,bon=parseFloat(entry.bonus)||0;
+    rows+=rowHTML('Base Salary',bG,'income');
+    if(rev>0)rows+=rowHTML('Revenue',rev,'income');
+    if(bon>0)rows+=rowHTML('Bonus',bon,'income');
+    rows+=rowHTML('Gross Income',gross,'sub');
+    if(isPerm){
+      if(sso>0)rows+=rowHTML('SSO (5%)',sso,'ded');
+      if(mT>0)rows+=rowHTML('Income Tax ภงด.1',mT,'ded');
+    }else if(whtD>0)rows+=rowHTML('WHT 3%',whtD,'ded');
+    if(adv>0)rows+=rowHTML('Advance',adv,'ded');
+    if(dO>0)rows+=rowHTML('Other Deductions',dO,'ded');
+  }
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8">
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
