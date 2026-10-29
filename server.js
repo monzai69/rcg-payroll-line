@@ -48,6 +48,42 @@ app.use(express.json({ limit: '10mb' }));
 const PORT = process.env.PORT || 3000;
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const LIFF_ID = process.env.LIFF_ID;
+const ADMIN_LINE_ID = process.env.ADMIN_LINE_ID || null; // set on Railway to receive confirm notifications
+
+// ── PUBLISH META (own document — ONLY the server writes this) ─────────────
+// Holds per-period: published flag, publish/reminder/auto-confirm timestamps,
+// and staff confirmations. Kept OUT of config/payroll so a browser saving the
+// payroll document can never erase it.
+async function getPublishMeta() {
+  const snap = await db.collection('config').doc('publish_meta').get();
+  if (!snap.exists) return {};
+  return JSON.parse(snap.data().data || '{}');
+}
+async function savePublishMeta(meta) {
+  await db.collection('config').doc('publish_meta').set({ data: JSON.stringify(meta), updatedAt: Date.now() });
+}
+// Resolve a period's meta: new doc wins when the key exists there; otherwise
+// fall back to the legacy payroll[key]._meta written before this migration.
+function resolveMeta(pubMeta, payroll, key) {
+  if (pubMeta[key] !== undefined) return pubMeta[key];
+  return (payroll[key] && payroll[key]._meta) || null;
+}
+// When the new doc first touches a legacy-published period (e.g. a staff
+// confirms), seed it from the legacy _meta so the published flag carries over.
+function ensurePub(pubMeta, payroll, key) {
+  if (!pubMeta[key]) {
+    const legacy = (payroll[key] && payroll[key]._meta) || {};
+    pubMeta[key] = { ...legacy };
+  }
+  if (!pubMeta[key].confirmations) pubMeta[key].confirmations = {};
+  return pubMeta[key];
+}
+function isConfirmed(pubMeta, payroll, key, staffId) {
+  const m = pubMeta[key];
+  if (m && m.confirmations && m.confirmations[staffId]) return !!m.confirmations[staffId].confirmed;
+  const e = payroll[key] && payroll[key][staffId];
+  return !!(e && e.confirmed); // legacy location
+}
 
 // ── HELPERS ────────────────────────────────────────────
 async function getAllStaff() {
@@ -244,16 +280,20 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
   try {
     const { staffId, year, month } = req.params;
     const payroll = await getPayroll();
+    const pubMeta = await getPublishMeta();
     const key = mkKey(month, year);
     const entry = payroll[key] && payroll[key][staffId];
     if (!entry) return res.json({ ok: false, msg: 'Salary not published yet for this period' });
-    const meta = payroll[key]._meta;
+    const meta = resolveMeta(pubMeta, payroll, key);
     if (!meta || !meta.published) return res.json({ ok: false, msg: 'ยังไม่เปิดให้ตรวจสอบเงินเดือน / Salary not published yet' });
     const allStaff = await getAllStaff();
     const staff = allStaff.find(s => s.id === staffId);
     if (!staff) return res.json({ ok: false, msg: 'Staff not found' });
 
     const net = parseFloat(entry.net) || 0;
+    const conf = (meta.confirmations && meta.confirmations[staffId]) || {};
+    const confirmed = !!conf.confirmed || !!entry.confirmed; // legacy fallback
+    const confirmedAt = conf.confirmedAt || entry.confirmedAt || null;
 
     // If full breakdown rows were saved, use them directly
     if (entry.payRows && entry.payRows.length) {
@@ -264,8 +304,8 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
         pos: staff.pos || '',
         net,
         rows: entry.payRows,
-        confirmed: !!entry.confirmed,
-        confirmedAt: entry.confirmedAt || null
+        confirmed,
+        confirmedAt
       });
     }
 
@@ -296,7 +336,7 @@ app.get('/api/salary/:staffId/:year/:month', async (req, res) => {
     if (adv > 0) rows.push({ label: 'Advance', amt: -adv, type: 'ded' });
     if (dO > 0) rows.push({ label: 'Other Deductions', amt: -dO, type: 'ded' });
     rows.push({ label: 'NET PAY', amt: net, type: 'net' });
-    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, staffName: `${staff.nn} ${staff.fn}`, pos: staff.pos || '', net, rows, confirmed: !!entry.confirmed, confirmedAt: entry.confirmedAt || null });
+    res.json({ ok: true, period: `${MTH[parseInt(month)-1]} ${year}`, staffName: `${staff.nn} ${staff.fn}`, pos: staff.pos || '', net, rows, confirmed, confirmedAt });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
@@ -573,21 +613,25 @@ app.post('/api/confirm-salary', async (req, res) => {
     const payroll = await getPayroll();
     const key = mkKey(month, year);
     if (!payroll[key] || !payroll[key][staffId]) return res.json({ ok: false, msg: 'No salary data found' });
-    // Save confirmation
-    payroll[key][staffId].confirmed = true;
-    payroll[key][staffId].confirmedAt = new Date().toISOString();
-    await savePayroll(payroll);
-    // Notify admin via LINE
+    // Save confirmation into the publish-meta doc (server-owned; browser saves
+    // of the payroll document can never erase it)
+    const pubMeta = await getPublishMeta();
+    const pm = ensurePub(pubMeta, payroll, key);
+    pm.confirmations[staffId] = { confirmed: true, confirmedAt: new Date().toISOString() };
+    await savePublishMeta(pubMeta);
+    // Notify admin via LINE (requires ADMIN_LINE_ID env var on Railway)
     const period = `${MTH[parseInt(month)-1]} ${year}`;
-    try {
-      await lineClient.pushMessage({
-        to: ADMIN_LINE_ID,
-        messages: [{
-          type: 'text',
-          text: `✅ ${staff.nn} ${staff.fn} ยืนยันเงินเดือน ${period} แล้ว`
-        }]
-      });
-    } catch(e) { console.error('Admin notify error:', e.message); }
+    if (ADMIN_LINE_ID) {
+      try {
+        await lineClient.pushMessage({
+          to: ADMIN_LINE_ID,
+          messages: [{
+            type: 'text',
+            text: `✅ ${staff.nn} ${staff.fn} ยืนยันเงินเดือน ${period} แล้ว`
+          }]
+        });
+      } catch(e) { console.error('Admin notify error:', e.message); }
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
@@ -598,6 +642,26 @@ app.post('/api/publish-salary', async (req, res) => {
     const allStaff = await getAllStaff();
     const staffWithLine = allStaff.filter(s => s.lineUserId && s.st === 'Active');
     const period = `${MTH[parseInt(month)-1]} ${year}`;
+
+    // Mark published FIRST, so staff tapping the notification immediately never
+    // hit "not published yet". Written to the server-owned publish-meta doc —
+    // a browser saving the payroll document can never erase it again.
+    const payroll = await getPayroll();
+    const pubMeta = await getPublishMeta();
+    const key = mkKey(month, year);
+    const now = Date.now();
+    const prev = ensurePub(pubMeta, payroll, key); // keeps existing confirmations on republish
+    pubMeta[key] = {
+      ...prev,
+      published: true,
+      publishedAt: new Date(now).toISOString(),
+      reminderAt: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
+      reminderSent: false,
+      autoConfirmAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
+      autoConfirmDone: false
+    };
+    await savePublishMeta(pubMeta);
+
     let sent = 0;
     for (const s of staffWithLine) {
       try {
@@ -641,22 +705,26 @@ app.post('/api/publish-salary', async (req, res) => {
       } catch (e) { console.error('Failed to notify', s.id, e.message); }
     }
 
-    // Mark this period as published + schedule reminder/auto-confirm checks
-    const payroll = await getPayroll();
-    const key = mkKey(month, year);
-    if (!payroll[key]) payroll[key] = {};
-    const now = Date.now();
-    payroll[key]._meta = {
-      published: true,
-      publishedAt: new Date(now).toISOString(),
-      reminderAt: new Date(now + 2 * 60 * 60 * 1000).toISOString(),
-      reminderSent: false,
-      autoConfirmAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
-      autoConfirmDone: false
-    };
-    await savePayroll(payroll);
-
     res.json({ ok: true, sent, total: staffWithLine.length });
+  } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
+});
+
+// Unpublish a period (the admin toggle's OFF state) — staff see "not published
+// yet" again. No LINE messages are sent. Confirmations are kept, so switching
+// back on doesn't lose who already confirmed.
+app.post('/api/unpublish-salary', async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const payroll = await getPayroll();
+    const pubMeta = await getPublishMeta();
+    const key = mkKey(month, year);
+    const pm = ensurePub(pubMeta, payroll, key);
+    pm.published = false;
+    pm.unpublishedAt = new Date().toISOString();
+    pm.reminderSent = true;      // stop pending reminder
+    pm.autoConfirmDone = true;   // stop pending auto-confirm
+    await savePublishMeta(pubMeta);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, msg: e.message }); }
 });
 
@@ -845,23 +913,36 @@ function buildCertHTML(staff, branch, company, showSalary, dateStr, logos, sigst
 cron.schedule('*/10 * * * *', async () => {
   try {
     const payroll = await getPayroll();
+    const pubMeta = await getPublishMeta();
     const allStaff = await getAllStaff();
     const now = Date.now();
     let changed = false;
 
+    // Migrate any legacy-published period (flag still in payroll[key]._meta,
+    // from before the publish-meta doc existed) into the new doc on first pass,
+    // so its pending reminder/auto-confirm still fires — from the new doc.
     for (const key of Object.keys(payroll)) {
-      const period = payroll[key];
-      const meta = period && period._meta;
+      const legacy = payroll[key] && payroll[key]._meta;
+      if (legacy && legacy.published && pubMeta[key] === undefined) {
+        ensurePub(pubMeta, payroll, key);
+        changed = true;
+      }
+    }
+
+    for (const key of Object.keys(pubMeta)) {
+      const meta = pubMeta[key];
       if (!meta || !meta.published) continue;
+      const period = payroll[key] || {};
+      if (!meta.confirmations) meta.confirmations = {};
       const staffIds = Object.keys(period).filter(k => k !== '_meta');
+      const confirmed = sid => isConfirmed(pubMeta, payroll, key, sid);
 
       // 2hr reminder — nudge unconfirmed Active staff who have LINE registered
       if (!meta.reminderSent && meta.reminderAt && now >= new Date(meta.reminderAt).getTime()) {
         const [y, m] = key.split('_');
         const periodLabel = `${MTH[parseInt(m) - 1]} ${y}`;
         for (const sid of staffIds) {
-          const entry = period[sid];
-          if (entry.confirmed) continue;
+          if (confirmed(sid)) continue;
           const staff = allStaff.find(s => s.id === sid);
           if (!staff || staff.st !== 'Active' || !staff.lineUserId) continue;
           try {
@@ -878,13 +959,10 @@ cron.schedule('*/10 * * * *', async () => {
       // 5hr auto-confirm — mark remaining unconfirmed Active staff as confirmed, stop further reminders
       if (!meta.autoConfirmDone && meta.autoConfirmAt && now >= new Date(meta.autoConfirmAt).getTime()) {
         for (const sid of staffIds) {
-          const entry = period[sid];
           const staff = allStaff.find(s => s.id === sid);
           if (!staff || staff.st !== 'Active') continue;
-          if (!entry.confirmed) {
-            entry.confirmed = true;
-            entry.autoConfirmed = true;
-            entry.confirmedAt = new Date(now).toISOString();
+          if (!confirmed(sid)) {
+            meta.confirmations[sid] = { confirmed: true, autoConfirmed: true, confirmedAt: new Date(now).toISOString() };
           }
         }
         meta.autoConfirmDone = true;
@@ -893,7 +971,7 @@ cron.schedule('*/10 * * * *', async () => {
     }
 
     if (changed) {
-      await savePayroll(payroll);
+      await savePublishMeta(pubMeta);
       console.log('⏰ Cron: salary reminder/auto-confirm check completed');
     }
   } catch (e) { console.error('Cron salary reminder error:', e); }
